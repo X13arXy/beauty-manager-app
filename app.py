@@ -213,12 +213,47 @@ elif page == "🤖 Automat SMS":
         cel = st.selectbox("Cel:", ["Przypomnienie", "Promocja -20%", "Wolny termin jutro", "Inny..."])
         if cel == "Inny...":
             cel = st.text_input("Wpisz cel:")
+        
+        # --- ZMIANA KODU WPROWADZAJĄCA TRYB PRODUKCYJNY ---
+        
+        # 1. Ustawiamy tryb testowy na stałą wartość FALSE (brak symulacji)
+        test_mode = False 
+        
+        btn_text = "💸 WYŚLIJ NAPRAWDĘ (PŁATNE)" # Zawsze widoczny
+        btn_type = "primary"
+        
+        if st.button(btn_text, type=btn_type):
             
-        if st.button("Generuj i Wyślij (Test)"):
-            st.write("Generowanie wiadomości dla:", ", ".join(wybrane))
+            # Wczytujemy klucz bezpośrednio z secrets (już bez load_dotenv)
+            sms_token = st.secrets["SMSAPI_TOKEN"]
             
-            progress = st.progress(0)
-            for i, (_, row) in enumerate(target.iterrows()):
+            # Sprawdzenie, czy klucz istnieje (mimo że jest w secrets, robimy to dla bezpieczeństwa)
+            if not sms_token:
+                st.error("❌ Brak tokenu SMSAPI w Streamlit Secrets!")
+                st.stop()
+            
+            client = None
+            try:
+                # Inicjalizacja klienta SMSAPI
+                client = SmsApiPlClient(access_token=sms_token)
+            except Exception as e:
+                st.error(f"Błąd logowania SMSAPI: {e}")
+                st.stop()
+
+            st.write("---")
+            progress_bar = st.progress(0)
+            
+            # Konfiguracja bezpieczeństwa AI (bez zmian)
+            safety_settings = [
+                {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+            ]
+
+            # Pętla wysyłki (bez zmian, tylko usuwamy tryb testowy wewnątrz)
+            for index, row in target.iterrows():
+                
                 prompt = f"""
                 Jesteś recepcjonistką w salonie beauty {USER_EMAIL}. 
                 Napisz krótkiego SMS-a (max 160 znaków).
@@ -228,12 +263,23 @@ elif page == "🤖 Automat SMS":
                 """
                 
                 try:
-                    res = model.generate_content(prompt)
-                    clean = usun_ogonki(res.text)
-                    st.info(f"Do {row['imie']}: {clean}")
-                except Exception as e:
-                    st.error(f"Błąd AI dla {row['imie']}: {e}")
+                    res = model.generate_content(prompt, safety_settings=safety_settings)
+                    raw_text = res.text.strip()
+                    clean_text = usun_ogonki(raw_text)
                     
+                    # WYSYŁKA REALNA
+                    try:
+                        client.sms.send(to=row['telefon'], message=clean_text)
+                        st.success(f"✅ Wysłano do: {row['imie']}")
+                    except SmsApiException as e:
+                        st.error(f"Błąd bramki SMS dla {row['imie']}: {e}")
+                            
+                except Exception as e:
+                    st.error(f"Błąd AI/Systemowy przy {row['imie']}: {e}")
+                
                 time.sleep(1)
-                progress.progress((i+1)/len(target))
-            st.success("Gotowe!")
+                progress_bar.progress((index + 1) / len(target))
+            
+            st.balloons()
+            st.success("🎉 Kampania zakończona!")
+
