@@ -4,7 +4,6 @@ import google.generativeai as genai
 import os
 import time
 # Używamy st.secrets, jeśli dostępne. Jeśli nie, używamy python-dotenv dla lokalnego uruchomienia.
-from dotenv import load_dotenv 
 from supabase import create_client, Client
 
 
@@ -245,3 +244,4 @@ elif page == "🤖 Automat SMS":
                 time.sleep(1)
                 progress.progress((i+1)/len(target))
             st.success("Gotowe!")
+
