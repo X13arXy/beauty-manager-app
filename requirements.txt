@@ -3,4 +3,5 @@ pandas
 google-generativeai
 python-dotenv
 smsapi-client
-penpyxl
+
+
