@@ -260,6 +260,7 @@ elif page == "🤖 Automat SMS":
                 KLIENTKA: {row['imie']} (Ostatni zabieg: {row['ostatni_zabieg']})
                 CEL: {cel}
                 ZASADY: 1. Pisz naturalnie. 2. Używaj języka korzyści. 3. Dodaj 1 emoji. 4. Podpisz się nazwą salonu (np. Glow Studio).
+                **ABSOLUTNY ZAKAZ: Nie używaj ŻADNYCH linków, adresów stron internetowych (URL), słów "http", "www", ".pl" ani ".com".**
                 """
                 
                 try:
@@ -282,4 +283,5 @@ elif page == "🤖 Automat SMS":
             
             st.balloons()
             st.success("🎉 Kampania zakończona!")
+
 
