@@ -3,7 +3,7 @@ import pandas as pd
 import google.generativeai as genai
 import os
 import time
-# Używamy st.secrets, jeśli dostępne. Jeśli nie, używamy python-dotenv dla lokalnego uruchomienia.
+# Usunęliśmy: from dotenv import load_dotenv
 from supabase import create_client, Client
 
 
@@ -18,21 +18,15 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- FUNKCJA ŁADUJĄCA KLUCZE (Uniwersalna) ---
+# --- FUNKCJA ŁADUJĄCA KLUCZE (Optymalizacja dla Streamlit Cloud) ---
 def load_secrets():
-    # Streamlit Cloud automatycznie ustawia ten klucz (PYTHONPATH), 
-    # więc jeśli jest, używamy st.secrets.
-    if 'PYTHONPATH' in os.environ and 'SUPABASE_URL' not in st.secrets:
-        # Ten warunek jest dla Streamlit Cloud, gdy klucze są w [secrets]
-        return st.secrets 
-    
-    # Dla lokalnego uruchomienia (VS Code)
-   
+    """Wczytuje klucze wyłącznie z obiektu st.secrets."""
+    # Jeśli klucz SUPABASE_URL nie istnieje w st.secrets, Streamlit zwróci błąd.
     return {
-        "SUPABASE_URL": os.getenv("SUPABASE_URL"),
-        "SUPABASE_KEY": os.getenv("SUPABASE_KEY"),
-        "GOOGLE_API_KEY": os.getenv("GOOGLE_API_KEY"),
-        "SMSAPI_TOKEN": os.getenv("SMSAPI_TOKEN")
+        "SUPABASE_URL": st.secrets["SUPABASE_URL"],
+        "SUPABASE_KEY": st.secrets["SUPABASE_KEY"],
+        "GOOGLE_API_KEY": st.secrets["GOOGLE_API_KEY"],
+        "SMSAPI_TOKEN": st.secrets["SMSAPI_TOKEN"]
     }
 
 SECRETS = load_secrets()
@@ -44,7 +38,8 @@ GOOGLE_API_KEY = SECRETS.get("GOOGLE_API_KEY")
 SMSAPI_TOKEN = SECRETS.get("SMSAPI_TOKEN")
 
 if not all([SUPABASE_URL, SUPABASE_KEY, GOOGLE_API_KEY]):
-    st.error("❌ Brakuje kluczy w konfiguracji (sprawdź .env lub Streamlit Secrets)!")
+    # Ten błąd powinien już nie wystąpić, jeśli Secrets są poprawne.
+    st.error("❌ Brakuje kluczy w konfiguracji Streamlit Secrets!")
     st.stop()
 
 # Inicjalizacja klientów
@@ -56,8 +51,7 @@ try:
     from smsapi.client import SmsApiPlClient
     from smsapi.exception import SmsApiException
 except ImportError:
-    # Aplikacja działa, ale funkcja SMS nie zadziała, jeśli nie ma biblioteki
-    st.warning("Brak biblioteki smsapi-client. Automat SMS może nie działać.")
+    st.warning("Brak biblioteki smsapi-client na serwerze. Automat SMS może nie działać.")
 
 # --- 2. ZARZĄDZANIE SESJĄ (LOGOWANIE) ---
 
@@ -135,7 +129,7 @@ with st.sidebar:
 
 def add_client(imie, telefon, zabieg, data):
     payload = {
-        "salon_id": SALON_ID, # Automatycznie przypisuje ID zalogowanego użytkownika
+        "salon_id": SALON_ID, 
         "imie": imie,
         "telefon": telefon,
         "ostatni_zabieg": zabieg,
@@ -150,7 +144,6 @@ def add_client(imie, telefon, zabieg, data):
 
 def get_clients():
     try:
-        # Pobieramy TYLKO dane tego użytkownika (SALON_ID)
         response = supabase.table("klientki").select("*").eq("salon_id", SALON_ID).execute()
         return pd.DataFrame(response.data)
     except Exception as e:
@@ -158,7 +151,6 @@ def get_clients():
 
 def delete_client(client_id):
     try:
-        # Usuwamy tylko jeśli ID pasuje I salon_id pasuje (podwójne zabezpieczenie)
         supabase.table("klientki").delete().eq("id", client_id).eq("salon_id", SALON_ID).execute()
     except Exception as e:
         st.error(f"Błąd usuwania: {e}")
@@ -196,7 +188,6 @@ if page == "📂 Baza Klientek":
     if not df.empty:
         st.dataframe(df[['imie', 'telefon', 'ostatni_zabieg', 'data_wizyty']], use_container_width=True)
         
-        # Proste usuwanie
         cl_list = df.set_index('id')['imie'].to_dict()
         if cl_list:
             to_del = st.selectbox("Usuń klientkę:", options=cl_list.keys(), format_func=lambda x: cl_list[x])
@@ -213,7 +204,6 @@ elif page == "🤖 Automat SMS":
     if df.empty:
         st.warning("Najpierw dodaj klientki w bazie!")
     else:
-        # Logika SMS taka sama jak wcześniej
         wybrane = st.multiselect("Odbiorcy:", df['imie'].tolist(), default=df['imie'].tolist())
         target = df[df['imie'].isin(wybrane)]
         
@@ -244,5 +234,3 @@ elif page == "🤖 Automat SMS":
                 time.sleep(1)
                 progress.progress((i+1)/len(target))
             st.success("Gotowe!")
-
-
