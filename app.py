@@ -27,7 +27,7 @@ def load_secrets():
         return st.secrets 
     
     # Dla lokalnego uruchomienia (VS Code)
-    load_dotenv()
+   
     return {
         "SUPABASE_URL": os.getenv("SUPABASE_URL"),
         "SUPABASE_KEY": os.getenv("SUPABASE_KEY"),
@@ -244,4 +244,5 @@ elif page == "🤖 Automat SMS":
                 time.sleep(1)
                 progress.progress((i+1)/len(target))
             st.success("Gotowe!")
+
 
