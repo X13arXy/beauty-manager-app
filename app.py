@@ -18,32 +18,35 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- FUNKCJA ŁADUJĄCA KLUCZE (Optymalizacja dla Streamlit Cloud) ---
-def load_secrets():
-    """Wczytuje klucze wyłącznie z obiektu st.secrets."""
-    # Jeśli klucz SUPABASE_URL nie istnieje w st.secrets, Streamlit zwróci błąd.
-    return {
-        "SUPABASE_URL": st.secrets["SUPABASE_URL"],
-        "SUPABASE_KEY": st.secrets["SUPABASE_KEY"],
-        "GOOGLE_API_KEY": st.secrets["GOOGLE_API_KEY"],
-        "SMSAPI_TOKEN": st.secrets["SMSAPI_TOKEN"]
-    }
+# --- ŁADOWANIE KLUCZY Z CHMURY (TYLKO st.secrets) ---
 
-SECRETS = load_secrets()
+# Używamy st.secrets do pobrania kluczy z [secrets]
+try:
+    SUPABASE_URL = st.secrets["SUPABASE_URL"]
+    SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
+    GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]
+    SMSAPI_TOKEN = st.secrets["SMSAPI_TOKEN"]
 
-# Sprawdzamy klucze
-SUPABASE_URL = SECRETS.get("SUPABASE_URL")
-SUPABASE_KEY = SECRETS.get("SUPABASE_KEY")
-GOOGLE_API_KEY = SECRETS.get("GOOGLE_API_KEY")
-SMSAPI_TOKEN = SECRETS.get("SMSAPI_TOKEN")
+except KeyError as e:
+    # Ten błąd wystąpi, jeśli klucz jest źle nazwany lub brakuje nagłówka [secrets]
+    st.error(f"❌ Błąd: Brak klucza {e} w Streamlit Secrets!")
+    st.info("Sprawdź, czy w sekcji Secrets wkleiłeś klucze w formacie TOML, np. [secrets] i czy nazwy są poprawne.")
+    st.stop()
 
+
+# Sprawdzamy, czy klucze nie są puste (co oznacza, że TOML się wczytał, ale wartość jest pusta)
 if not all([SUPABASE_URL, SUPABASE_KEY, GOOGLE_API_KEY]):
-    # Ten błąd powinien już nie wystąpić, jeśli Secrets są poprawne.
-    st.error("❌ Brakuje kluczy w konfiguracji Streamlit Secrets!")
+    st.error("❌ Błąd wartości! Jeden z kluczy (Supabase URL/Key, Google API Key) jest pusty.")
     st.stop()
 
 # Inicjalizacja klientów
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+try:
+    supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+except Exception as e:
+    # Catching 'Invalid URL' z Supabase
+    st.error(f"❌ Błąd połączenia Supabase: {e}. Sprawdź, czy SUPABASE_URL jest poprawny i nie zawiera spacji.")
+    st.stop()
+
 genai.configure(api_key=GOOGLE_API_KEY)
 model = genai.GenerativeModel('models/gemini-flash-latest')
 
