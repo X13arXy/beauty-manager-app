@@ -2,242 +2,246 @@ import streamlit as st
 import pandas as pd
 import google.generativeai as genai
 import os
-import sqlite3
 import time
-from dotenv import load_dotenv
+# Używamy st.secrets, jeśli dostępne. Jeśli nie, używamy python-dotenv dla lokalnego uruchomienia.
+from dotenv import load_dotenv 
+from supabase import create_client, Client
 
-# Import biblioteki SMSAPI
+
+# --- 1. KONFIGURACJA I CSS ---
+st.set_page_config(page_title="Beauty SaaS", page_icon="💅", layout="wide")
+
+# Style CSS dla ładniejszego wyglądu logowania
+st.markdown("""
+<style>
+    .stButton>button { width: 100%; border-radius: 5px; }
+    .auth-container { max-width: 400px; margin: auto; padding: 20px; }
+</style>
+""", unsafe_allow_html=True)
+
+# --- FUNKCJA ŁADUJĄCA KLUCZE (Uniwersalna) ---
+def load_secrets():
+    # Streamlit Cloud automatycznie ustawia ten klucz (PYTHONPATH), 
+    # więc jeśli jest, używamy st.secrets.
+    if 'PYTHONPATH' in os.environ and 'SUPABASE_URL' not in st.secrets:
+        # Ten warunek jest dla Streamlit Cloud, gdy klucze są w [secrets]
+        return st.secrets 
+    
+    # Dla lokalnego uruchomienia (VS Code)
+    load_dotenv()
+    return {
+        "SUPABASE_URL": os.getenv("SUPABASE_URL"),
+        "SUPABASE_KEY": os.getenv("SUPABASE_KEY"),
+        "GOOGLE_API_KEY": os.getenv("GOOGLE_API_KEY"),
+        "SMSAPI_TOKEN": os.getenv("SMSAPI_TOKEN")
+    }
+
+SECRETS = load_secrets()
+
+# Sprawdzamy klucze
+SUPABASE_URL = SECRETS.get("SUPABASE_URL")
+SUPABASE_KEY = SECRETS.get("SUPABASE_KEY")
+GOOGLE_API_KEY = SECRETS.get("GOOGLE_API_KEY")
+SMSAPI_TOKEN = SECRETS.get("SMSAPI_TOKEN")
+
+if not all([SUPABASE_URL, SUPABASE_KEY, GOOGLE_API_KEY]):
+    st.error("❌ Brakuje kluczy w konfiguracji (sprawdź .env lub Streamlit Secrets)!")
+    st.stop()
+
+# Inicjalizacja klientów
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+genai.configure(api_key=GOOGLE_API_KEY)
+model = genai.GenerativeModel('models/gemini-flash-latest')
+
 try:
     from smsapi.client import SmsApiPlClient
     from smsapi.exception import SmsApiException
 except ImportError:
-    st.error("Brakuje biblioteki! Wpisz w terminalu: pip install smsapi-client")
-    st.stop()
+    # Aplikacja działa, ale funkcja SMS nie zadziała, jeśli nie ma biblioteki
+    st.warning("Brak biblioteki smsapi-client. Automat SMS może nie działać.")
 
-# --- 1. KONFIGURACJA ---
-load_dotenv()
+# --- 2. ZARZĄDZANIE SESJĄ (LOGOWANIE) ---
 
-# Konfiguracja Google AI
-api_key = os.getenv("GOOGLE_API_KEY")
-if not api_key:
-    st.error("❌ Brak klucza GOOGLE_API_KEY w pliku .env!")
-    st.stop()
+if 'user' not in st.session_state:
+    st.session_state['user'] = None
 
-genai.configure(api_key=api_key)
-# Model Flash (szybki i tani)
-model = genai.GenerativeModel('models/gemini-flash-latest')
+def login_user(email, password):
+    try:
+        response = supabase.auth.sign_in_with_password({"email": email, "password": password})
+        st.session_state['user'] = response.user
+        st.success("✅ Zalogowano pomyślnie!")
+        time.sleep(1)
+        st.rerun()
+    except Exception as e:
+        st.error(f"Błąd logowania: {e}")
 
-# Nazwa bazy danych
-DB_NAME = "baza_beauty.db"
+def register_user(email, password):
+    try:
+        response = supabase.auth.sign_up({"email": email, "password": password})
+        if response.user:
+            st.session_state['user'] = response.user
+            st.success("✅ Konto utworzone! Zalogowano.")
+            time.sleep(1)
+            st.rerun()
+    except Exception as e:
+        st.error(f"Błąd rejestracji: {e}")
 
-# --- 2. FUNKCJE POMOCNICZE ---
+def logout_user():
+    supabase.auth.sign_out()
+    st.session_state['user'] = None
+    st.rerun()
 
-def init_db():
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS klientki (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            imie TEXT NOT NULL,
-            telefon TEXT NOT NULL,
-            ostatni_zabieg TEXT,
-            data_wizyty TEXT
-        )
-    ''')
-    conn.commit()
-    conn.close()
+# --- 3. EKRAN LOGOWANIA ---
+
+if not st.session_state['user']:
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        st.title("💅 Beauty SaaS")
+        st.subheader("Zaloguj się do swojego salonu")
+        
+        tab1, tab2 = st.tabs(["Logowanie", "Rejestracja"])
+        
+        with tab1:
+            l_email = st.text_input("Email", key="l_email")
+            l_pass = st.text_input("Hasło", type="password", key="l_pass")
+            if st.button("Zaloguj się", type="primary"):
+                login_user(l_email, l_pass)
+                
+        with tab2:
+            st.info("Załóż konto, aby otrzymać własną, bezpieczną bazę danych.")
+            r_email = st.text_input("Email", key="r_email")
+            r_pass = st.text_input("Hasło", type="password", key="r_pass")
+            if st.button("Załóż konto"):
+                register_user(r_email, r_pass)
+    
+    st.stop()  # ZATRZYMUJEMY KOD TUTAJ JEŚLI NIE ZALOGOWANY
+
+# =========================================================
+#  TUTAJ ZACZYNA SIĘ APLIKACJA DLA ZALOGOWANEGO UŻYTKOWNIKA
+# =========================================================
+
+# Pobieramy ID użytkownika z Supabase - to jest teraz nasz SALON_ID!
+CURRENT_USER = st.session_state['user']
+SALON_ID = CURRENT_USER.id 
+USER_EMAIL = CURRENT_USER.email
+
+# Sidebar z informacjami o koncie
+with st.sidebar:
+    st.write(f"Zalogowano jako: **{USER_EMAIL}**")
+    if st.button("Wyloguj"):
+        logout_user()
+    st.divider()
+
+# --- 4. FUNKCJE BAZODANOWE (SaaS) ---
 
 def add_client(imie, telefon, zabieg, data):
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute('INSERT INTO klientki (imie, telefon, ostatni_zabieg, data_wizyty) VALUES (?, ?, ?, ?)',
-              (imie, telefon, zabieg, data))
-    conn.commit()
-    conn.close()
+    payload = {
+        "salon_id": SALON_ID, # Automatycznie przypisuje ID zalogowanego użytkownika
+        "imie": imie,
+        "telefon": telefon,
+        "ostatni_zabieg": zabieg,
+        "data_wizyty": str(data)
+    }
+    try:
+        supabase.table("klientki").insert(payload).execute()
+        return True
+    except Exception as e:
+        st.error(f"Błąd zapisu: {e}")
+        return False
 
 def get_clients():
-    conn = sqlite3.connect(DB_NAME)
-    df = pd.read_sql_query("SELECT * FROM klientki", conn)
-    conn.close()
-    return df
+    try:
+        # Pobieramy TYLKO dane tego użytkownika (SALON_ID)
+        response = supabase.table("klientki").select("*").eq("salon_id", SALON_ID).execute()
+        return pd.DataFrame(response.data)
+    except Exception as e:
+        return pd.DataFrame()
 
 def delete_client(client_id):
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute('DELETE FROM klientki WHERE id = ?', (client_id,))
-    conn.commit()
-    conn.close()
+    try:
+        # Usuwamy tylko jeśli ID pasuje I salon_id pasuje (podwójne zabezpieczenie)
+        supabase.table("klientki").delete().eq("id", client_id).eq("salon_id", SALON_ID).execute()
+    except Exception as e:
+        st.error(f"Błąd usuwania: {e}")
 
 def usun_ogonki(tekst):
-    """Zamienia polskie znaki na łacińskie dla SMSAPI"""
-    mapa = {
-        'ą': 'a', 'ć': 'c', 'ę': 'e', 'ł': 'l', 'ń': 'n', 'ó': 'o', 'ś': 's', 'ź': 'z', 'ż': 'z',
-        'Ą': 'A', 'Ć': 'C', 'Ę': 'E', 'Ł': 'L', 'Ń': 'N', 'Ó': 'O', 'Ś': 'S', 'Ź': 'Z', 'Ż': 'Z'
-    }
+    mapa = {'ą': 'a', 'ć': 'c', 'ę': 'e', 'ł': 'l', 'ń': 'n', 'ó': 'o', 'ś': 's', 'ź': 'z', 'ż': 'z',
+            'Ą': 'A', 'Ć': 'C', 'Ę': 'E', 'Ł': 'L', 'Ń': 'N', 'Ó': 'O', 'Ś': 'S', 'Ź': 'Z', 'Ż': 'Z'}
     for pl, latin in mapa.items():
         tekst = tekst.replace(pl, latin)
     return tekst
 
-init_db()
+# --- 5. INTERFEJS GŁÓWNY ---
 
-# --- 3. INTERFEJS APLIKACJI ---
-st.set_page_config(page_title="Beauty Manager AI", page_icon="💅", layout="wide")
-st.title("💅 Beauty Manager & AI Agent")
+st.title(f"Panel Salonu")
+page = st.sidebar.radio("Menu", ["📂 Baza Klientek", "🤖 Automat SMS"])
 
-page = st.sidebar.radio("Nawigacja", ["📂 Baza Klientek", "🤖 Automat SMS"])
-
-# ==========================================
-# ZAKŁADKA 1: BAZA DANYCH
-# ==========================================
 if page == "📂 Baza Klientek":
-    st.header("Zarządzaj swoją bazą")
+    st.header("Twoja Baza")
     
-    with st.expander("➕ Dodaj nową klientkę", expanded=True):
-        col1, col2 = st.columns(2)
-        with col1:
-            new_imie = st.text_input("Imię")
-            new_tel = st.text_input("Telefon (np. 48123456789)")
-        with col2:
-            new_zabieg = st.text_input("Ostatni Zabieg", value="Manicure")
-            new_data = st.date_input("Data Ostatniej Wizyty").strftime("%Y-%m-%d")
+    with st.expander("➕ Dodaj klientkę", expanded=False):
+        c1, c2 = st.columns(2)
+        imie = c1.text_input("Imię i Nazwisko")
+        tel = c1.text_input("Telefon")
+        zabieg = c2.text_input("Zabieg", "Manicure")
+        data = c2.date_input("Data wizyty")
         
-        if st.button("Zapisz w bazie"):
-            if new_imie and new_tel:
-                add_client(new_imie, new_tel, new_zabieg, new_data)
-                st.success(f"✅ Dodano {new_imie} do bazy!")
-                time.sleep(1)
+        if st.button("Zapisz"):
+            if imie and tel:
+                add_client(imie, tel, zabieg, data)
+                st.success("Dodano!")
+                time.sleep(0.5)
                 st.rerun()
-            else:
-                st.warning("⚠️ Podaj Imię i Telefon.")
 
-    st.subheader("Twoje Klientki:")
     df = get_clients()
-    
     if not df.empty:
-        st.dataframe(df, use_container_width=True)
-        col_del1, col_del2 = st.columns([1, 3])
-        with col_del1:
-            id_to_del = st.number_input("ID do usunięcia", min_value=1, step=1)
-        with col_del2:
-            st.write("") 
-            st.write("") 
-            if st.button("🗑️ Usuń wpis"):
-                delete_client(id_to_del)
-                st.warning(f"Usunięto ID: {id_to_del}")
-                time.sleep(1)
+        st.dataframe(df[['imie', 'telefon', 'ostatni_zabieg', 'data_wizyty']], use_container_width=True)
+        
+        # Proste usuwanie
+        cl_list = df.set_index('id')['imie'].to_dict()
+        if cl_list:
+            to_del = st.selectbox("Usuń klientkę:", options=cl_list.keys(), format_func=lambda x: cl_list[x])
+            if st.button("Usuń wybraną"):
+                delete_client(to_del)
                 st.rerun()
     else:
-        st.info("Baza jest pusta.")
+        st.info("Twoja baza jest pusta. Dodaj pierwszą klientkę!")
 
-# ==========================================
-# ZAKŁADKA 2: AUTOMAT SMS
-# ==========================================
 elif page == "🤖 Automat SMS":
-    st.header("✨ Automat SMS (Powered by SMSAPI)")
-    
+    st.header("Generator SMS AI")
     df = get_clients()
     
     if df.empty:
-        st.error("❌ Baza jest pusta! Najpierw dodaj klientki.")
+        st.warning("Najpierw dodaj klientki w bazie!")
     else:
-        client_names = df['imie'].tolist()
-        selected_names = st.multiselect("Do kogo wysłać?", client_names, default=client_names)
-        target_df = df[df['imie'].isin(selected_names)]
+        # Logika SMS taka sama jak wcześniej
+        wybrane = st.multiselect("Odbiorcy:", df['imie'].tolist(), default=df['imie'].tolist())
+        target = df[df['imie'].isin(wybrane)]
         
-        st.info(f"Wybrano: {len(target_df)} osób.")
-        
-        with st.container(border=True):
-            st.subheader("⚙️ Konfiguracja Kampanii")
-            salon_name = st.text_input("Nazwa Salonu", value="Glow Studio")
+        cel = st.selectbox("Cel:", ["Przypomnienie", "Promocja -20%", "Wolny termin jutro", "Inny..."])
+        if cel == "Inny...":
+            cel = st.text_input("Wpisz cel:")
             
-            cele = [
-                "Przypomnienie o wizycie (Standard)", 
-                "🔥 LAST MINUTE (Zwolnił się termin jutro!)",
-                "🎂 Urodziny (-20%)",
-                "⭐ Prośba o opinię Google",
-                "✏️ Własny cel..."
-            ]
-            wybor_celu = st.selectbox("Cel wiadomości:", cele)
+        if st.button("Generuj i Wyślij (Test)"):
+            st.write("Generowanie wiadomości dla:", ", ".join(wybrane))
             
-            if wybor_celu == "✏️ Własny cel...":
-                campaign_goal = st.text_input("Wpisz swój cel:")
-            else:
-                campaign_goal = wybor_celu
-            
-            test_mode = st.checkbox("🛠️ TRYB TESTOWY (Bezpieczny - nie wysyła naprawdę)", value=True)
-
-        btn_text = "🚀 WYŚLIJ SYMULACJĘ" if test_mode else "💸 WYŚLIJ NAPRAWDĘ (PŁATNE)"
-        btn_type = "secondary" if test_mode else "primary"
-        
-        if st.button(btn_text, type=btn_type):
-            
-            sms_token = os.getenv("SMSAPI_TOKEN")
-            if not test_mode and not sms_token:
-                st.error("❌ Brak tokenu SMSAPI w pliku .env!")
-                st.stop()
-            
-            client = None
-            if not test_mode:
-                try:
-                    client = SmsApiPlClient(access_token=sms_token)
-                except Exception as e:
-                    st.error(f"Błąd logowania SMSAPI: {e}")
-                    st.stop()
-
-            st.write("---")
-            progress_bar = st.progress(0)
-            
-            # --- KONFIGURACJA BEZPIECZEŃSTWA (Wyłączamy filtry) ---
-            safety_settings = [
-                {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-                {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-                {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
-                {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
-            ]
-
-            for index, row in target_df.iterrows():
-                
+            progress = st.progress(0)
+            for i, (_, row) in enumerate(target.iterrows()):
                 prompt = f"""
-                Jesteś recepcjonistką w salonie beauty "{salon_name}". 
+                Jesteś recepcjonistką w salonie beauty {USER_EMAIL}. 
                 Napisz krótkiego SMS-a (max 160 znaków).
-                
                 KLIENTKA: {row['imie']} (Ostatni zabieg: {row['ostatni_zabieg']})
-                CEL: {campaign_goal}
-                
-                ZASADY:
-                1. Pisz naturalnie, ładną polszczyzną (my to potem oczyścimy z ogonków).
-                2. Używaj języka korzyści.
-                3. Dodaj 1 emoji.
-                4. Podpisz się nazwą salonu.
+                CEL: {cel}
+                ZASADY: 1. Pisz naturalnie. 2. Używaj języka korzyści. 3. Dodaj 1 emoji. 4. Podpisz się nazwą salonu (np. Glow Studio).
                 """
                 
                 try:
-                    # Generowanie z wyłączonymi filtrami
-                    response = model.generate_content(prompt, safety_settings=safety_settings)
-                    
-                    # Sprawdzenie czy odpowiedź nie jest pusta
-                    if not response.parts:
-                        st.warning(f"⚠️ AI nie zwróciło treści dla {row['imie']}. Może być problem z połączeniem.")
-                        continue
-
-                    raw_text = response.text.strip()
-                    clean_text = usun_ogonki(raw_text)
-                    
-                    if test_mode:
-                        st.success(f"🧪 [TEST] Do: {row['imie']} ({row['telefon']})")
-                        st.code(clean_text)
-                    else:
-                        try:
-                            client.sms.send(to=row['telefon'], message=clean_text)
-                            st.success(f"✅ Wysłano do: {row['imie']}")
-                        except SmsApiException as e:
-                            st.error(f"Błąd bramki SMS dla {row['imie']}: {e}")
-                            
+                    res = model.generate_content(prompt)
+                    clean = usun_ogonki(res.text)
+                    st.info(f"Do {row['imie']}: {clean}")
                 except Exception as e:
-                    st.error(f"Błąd przy {row['imie']}: {e}")
-                
-                time.sleep(5) 
-                progress_bar.progress((index + 1) / len(target_df))
-            
-            st.balloons()
-            st.success("🎉 Kampania zakończona!")
+                    st.error(f"Błąd AI dla {row['imie']}: {e}")
+                    
+                time.sleep(1)
+                progress.progress((i+1)/len(target))
+            st.success("Gotowe!")
