@@ -21,7 +21,7 @@ try:
     SUPABASE_URL = st.secrets["SUPABASE_URL"]
     SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
     GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]
-    SMSAPI_TOKEN = st.secrets["SMSAPI_TOKEN"]
+    SMSAPI_TOKEN = st.secrets.get("SMSAPI_TOKEN", "") # Opcjonalne
 
 except KeyError as e:
     st.error(f"❌ Błąd: Brak klucza {e} w Streamlit Secrets! Sprawdź format TOML.")
@@ -35,11 +35,12 @@ if not all([SUPABASE_URL, SUPABASE_KEY, GOOGLE_API_KEY]):
 try:
     supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 except Exception as e:
-    st.error(f"❌ Błąd połączenia Supabase: {e}. Sprawdź, czy SUPABASE_URL jest poprawny.")
+    st.error(f"❌ Błąd połączenia Supabase: {e}. Sprawdź URL i KEY.")
     st.stop()
 
 genai.configure(api_key=GOOGLE_API_KEY)
-model = genai.GenerativeModel('models/gemini-flash-latest')
+# Używamy modelu 1.5 Flash (najbezpieczniejszy dla limitów)
+model = genai.GenerativeModel('gemini-1.5-flash-latest')
 
 try:
     from smsapi.client import SmsApiPlClient
@@ -57,6 +58,8 @@ if 'preview_client' not in st.session_state:
     st.session_state['preview_client'] = None
 if 'campaign_goal' not in st.session_state:
     st.session_state['campaign_goal'] = ""
+if 'salon_name' not in st.session_state:
+    st.session_state['salon_name'] = ""
 
 
 # --- FUNKCJE AUTORYZACJI (LOGOWANIE) ---
@@ -107,9 +110,9 @@ if not st.session_state['user']:
             r_email = st.text_input("Email", key="r_email")
             r_pass = st.text_input("Hasło", type="password", key="r_pass")
             if st.button("Załóż konto"):
-                register_user(r_email, r_pass)
+                 register_user(r_email, r_pass)
     
-    st.stop()  # ZATRZYMUJEMY KOD TUTAJ JEŚLI NIE ZALOGOWANY
+    st.stop()
 
 # =========================================================
 #  TUTAJ ZACZYNA SIĘ APLIKACJA DLA ZALOGOWANEGO UŻYTKOWNIKA
@@ -119,14 +122,13 @@ CURRENT_USER = st.session_state['user']
 SALON_ID = CURRENT_USER.id 
 USER_EMAIL = CURRENT_USER.email
 
-# Sidebar z informacjami o koncie
 with st.sidebar:
     st.write(f"Zalogowano jako: **{USER_EMAIL}**")
     if st.button("Wyloguj"):
         logout_user()
     st.divider()
 
-# --- 4. FUNKCJE BAZODANOWE (CRUD I HELPERY) ---
+# --- 4. FUNKCJE BAZODANOWE ---
 
 def usun_ogonki(tekst):
     mapa = {'ą': 'a', 'ć': 'c', 'ę': 'e', 'ł': 'l', 'ń': 'n', 'ó': 'o', 'ś': 's', 'ź': 'z', 'ż': 'z',
@@ -163,17 +165,16 @@ def delete_client(client_id):
     except Exception as e:
         st.error(f"Błąd usuwania: {e}")
         
-# --- FUNKCJA WYSYŁAJĄCA KAMPANIĘ SMS (ZMODYFIKOWANA O TRYB TESTOWY) ---
+# --- FUNKCJA WYSYŁAJĄCA KAMPANIĘ SMS ---
 def send_campaign_sms(target_df, campaign_goal, generated_text, is_test_mode):
     
-    sms_token = st.secrets["SMSAPI_TOKEN"]
+    sms_token = st.secrets.get("SMSAPI_TOKEN", "")
     
-    # Inicjalizacja klienta tylko w trybie produkcyjnym
     client = None
     if not is_test_mode:
         if not sms_token:
-            st.error("❌ Brak tokenu SMSAPI!")
-            return
+             st.error("❌ Brak tokenu SMSAPI!")
+             return
         try:
             client = SmsApiPlClient(access_token=sms_token)
         except Exception as e:
@@ -193,11 +194,11 @@ def send_campaign_sms(target_df, campaign_goal, generated_text, is_test_mode):
         clean_text = usun_ogonki(final_text)
 
         if is_test_mode:
-            # --- TRYB SYMULACJI (TEST NA NIBY) ---
+            # --- TRYB SYMULACJI ---
             st.code(f"SYMULACJA SMS DO: {row['imie']} ({row['telefon']})\nTREŚĆ: {clean_text}", language='text')
             st.success(f"🧪 [TEST] Symulacja wysyłki do: {row['imie']}")
         else:
-            # --- TRYB PRODUKCYJNY (PŁATNY) ---
+            # --- TRYB PRODUKCYJNY ---
             try:
                 client.sms.send(to=row['telefon'], message=clean_text)
                 st.success(f"✅ Wysłano do: {row['imie']}")
@@ -253,87 +254,79 @@ elif page == "🤖 Automat SMS":
     if df.empty:
         st.warning("Najpierw dodaj klientki w bazie!")
     else:
-        # Zmienna na celu kampanii
-        campaign_goal = st.text_input("Wpisz CEL KAMPANII (np. Otwarcie nowego lokalu! Promocja -20%):", 
+        st.write("### ⚙️ Konfiguracja")
+        salon_name = st.text_input("1. Wpisz nazwę swojego salonu (do podpisu):", 
+                                   value=st.session_state['salon_name'],
+                                   placeholder="np. Kox Beauty")
+        st.session_state['salon_name'] = salon_name
+
+        campaign_goal = st.text_input("2. Wpisz CEL KAMPANII:", 
                                       value=st.session_state['campaign_goal'])
         st.session_state['campaign_goal'] = campaign_goal 
 
-        wybrane = st.multiselect("Odbiorcy:", df['imie'].tolist(), default=df['imie'].tolist())
+        wybrane = st.multiselect("3. Wybierz Odbiorców:", df['imie'].tolist(), default=df['imie'].tolist())
         target_df = df[df['imie'].isin(wybrane)]
         
-        # Ustalenie klienta wzorcowego
-        sample_client = target_df.iloc[0]
-        st.info(f"Wybrano: {len(target_df)} osób. Wzór wiadomości zostanie wygenerowany dla: {sample_client['imie']}.")
-        
-        # --- KONTROLA JAKOŚCI TREŚCI (ETAP 1) ---
-        if st.button("🔍 1. Wygeneruj Podgląd", type="secondary"):
+        if not salon_name:
+            st.warning("⚠️ Proszę wpisać nazwę salonu powyżej.")
+        else:
+            if not target_df.empty:
+                sample_client = target_df.iloc[0]
+                st.info(f"Wybrano: {len(target_df)} osób. Wzór wiadomości dla: {sample_client['imie']}.")
+            else:
+                st.warning("Wybierz przynajmniej jedną osobę.")
+                st.stop()
             
-            st.session_state['sms_preview'] = None
-            
-            # --- ZACHOWANO TWÓJ ORYGINALNY PROMPT ---
-            prompt = f"""
-            Jesteś miłą i profesjonalną recepcjonistką w salonie beauty {USER_EMAIL}.
-            Twoim zadaniem jest napisanie bardzo krótkiego, osobistego SMS-a dla klientki.
-            
-            KLIENTKA WZORCOWA: {sample_client['imie']}
-            CEL KAMPANII: {campaign_goal}
-            
-            ZASADY:
-            1. **MAX 160 ZNAKÓW.** Wiadomość ma być maksymalnie zwięzła i efektywna.
-            2. Zwróć się do klientki po imieniu.
-            3. Pisz w życzliwym, ale profesjonalnym tonie.
-            4. Użyj języka korzyści, bazując na CELU KAMPANII.
-            5. Podpisz się nazwą salonu (np. Glow Studio).
-            6. **ABSOLUTNY ZAKAZ: Nie używaj ŻADNYCH linków, adresów stron internetowych (URL), słów "http", "www", ".pl" ani ".com"**.
-            7. Nie używaj polskich znaków: ę,ń,ć itd
-            """
-            
-            try:
-                # Generacja treści
-                response = model.generate_content(prompt)
-                raw_text = response.text.strip()
-                clean_text = usun_ogonki(raw_text)
+            # --- PRZYCISK GENEROWANIA (TU BYŁ BŁĄD) ---
+            if st.button("🔍 1. Wygeneruj Podgląd", type="secondary"):
                 
-                # Zapis do stanu sesji
-                st.session_state['sms_preview'] = clean_text
-                st.session_state['preview_client'] = sample_client['imie']
-            
-            except Exception as e:
-                 st.error(f"Błąd generacji AI: {e}")
-                 st.session_state['sms_preview'] = "BŁĄD GENERACJI"
-                 
-            st.rerun() 
-            
-
-        # --- WIDOK PODGLĄDU I AKCEPTACJA (ETAP 2) ---
-        if st.session_state['sms_preview']:
-            st.subheader("Podgląd Wygenerowanej Wiadomości:")
-            
-            st.code(st.session_state['sms_preview'], language='text')
-            st.warning(f"Treść zostanie wysłana do {len(target_df)} osób. Sprawdź, czy ma sens.")
-            
-            # --- NOWY WYBÓR TRYBU (DODANE) ---
-            st.write("---")
-            mode = st.radio("Wybierz tryb wysyłki:", 
-                            ["🧪 Tryb Testowy (Symulacja, bezpłatny)", 
-                             "💸 Tryb Produkcyjny (Płatny, wysyłka SMS)"],
-                            key="sms_mode_select")
-            
-            is_test_mode = (mode == "🧪 Tryb Testowy (Symulacja, bezpłatny)")
-            
-            # Dostosowanie przycisku do trybu
-            btn_label = "🚀 2. Zatwierdź i Wyślij (PRAWDA)" if not is_test_mode else "🧪 2. Zatwierdź i Wyślij (SYMULACJA)"
-            btn_type = "primary" if not is_test_mode else "secondary"
-
-            if st.button(btn_label, type=btn_type):
-                # Przekazujemy parametr is_test_mode do funkcji
-                send_campaign_sms(target_df, campaign_goal, st.session_state['sms_preview'], is_test_mode)
-                
-                # Czyścimy stan sesji po wysyłce
                 st.session_state['sms_preview'] = None
-                st.session_state['preview_client'] = None
+                
+                # POPRAWIONY PROMPT (zamknięte cudzysłowy!)
+                prompt = f"""
+                Jesteś recepcjonistką w salonie: {salon_name}.
+                Twoim zadaniem jest napisanie krótkiego SMS-a.
 
+                KLIENTKA: {sample_client['imie']}
+                CEL: {campaign_goal}
 
+                ZASADY:
+                1. MAX 160 ZNAKÓW.
+                2. Zwróć się do klientki po imieniu.
+                3. Pisz miło i zachęcająco.
+                4. PODPIS: Podpisz się DOKŁADNIE taką nazwą: "{salon_name}".
+                ""
+                
+                try:
+                    response = model.generate_content(prompt)
+                    raw_text = response.text.strip()
+                    clean_text = usun_ogonki(raw_text)
+                    
+                    st.session_state['sms_preview'] = clean_text
+                    st.session_state['preview_client'] = sample_client['imie']
+                
+                except Exception as e:
+                     st.error(f"Błąd generacji AI: {e}")
+                     st.session_state['sms_preview'] = "BŁĄD GENERACJI"
+                
+                st.rerun() 
 
+            # --- PODGLĄD I WYSYŁKA ---
+            if st.session_state['sms_preview']:
+                st.subheader("Podgląd:")
+                st.code(st.session_state['sms_preview'], language='text')
+                st.warning(f"Treść zostanie wysłana do {len(target_df)} osób.")
+                
+                st.write("---")
+                mode = st.radio("Wybierz tryb:", 
+                                ["🧪 Tryb Testowy (Symulacja)", "💸 Tryb Produkcyjny (Płatny)"],
+                                key="sms_mode_select")
+                
+                is_test_mode = (mode == "🧪 Tryb Testowy (Symulacja)")
+                btn_label = "🚀 2. Zatwierdź i Wyślij" if not is_test_mode else "🧪 2. Symuluj Wysyłkę"
+                btn_type = "primary" if not is_test_mode else "secondary"
 
-
+                if st.button(btn_label, type=btn_type):
+                    send_campaign_sms(target_df, campaign_goal, st.session_state['sms_preview'], is_test_mode)
+                    st.session_state['sms_preview'] = None
+                    st.session_state['preview_client'] = None
