@@ -325,3 +325,4 @@ elif page == "🤖 Automat SMS":
                 st.session_state['sms_preview'] = None
                 st.session_state['preview_client'] = None
 
+
