@@ -246,7 +246,7 @@ elif page == "🤖 Automat SMS":
                 Użyj języka korzyści (np. "poczuj się piękna", "zadbaj o siebie").
                 Podpisz się nazwą salonu.
                 Pisz poprawną polszczyzną (używaj ą, ę - my to potem zmienimy)."""
-                """
+              
                 try:
                     res = model.generate_content(prompt)
                     if res.text:
@@ -268,6 +268,7 @@ elif page == "🤖 Automat SMS":
                 if st.button("🚀 2. Wyślij", type="primary" if not is_test else "secondary"):
                     send_campaign_sms(target_df, campaign_goal, st.session_state['sms_preview'], is_test)
                     st.session_state['sms_preview'] = None
+
 
 
 
