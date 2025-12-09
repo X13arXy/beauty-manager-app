@@ -269,14 +269,14 @@ elif page == "🤖 Automat SMS":
         sample_client = target_df.iloc[0]
         st.info(f"Wybrano: {len(target_df)} osób. Wzór wiadomości zostanie wygenerowany dla: {sample_client['imie']}.")
         
-  ---
-  
-         if st.button("🔍 1. Wygeneruj Podgląd", type="secondary"):
+        
+        # --- KONTROLA JAKOŚCI TREŚCI (ETAP 1) ---
+        if st.button("🔍 1. Wygeneruj Podgląd", type="secondary"):
             
-            sample_client = target_df.iloc[0] 
+            # Wyczyść poprzednie podglądy
+            st.session_state['sms_preview'] = None
             
-      
-           prompt = f"""
+            prompt = f"""
             Jesteś miłą i profesjonalną recepcjonistką w salonie beauty {USER_EMAIL}.
             Twoim zadaniem jest napisanie bardzo krótkiego, osobistego SMS-a dla klientki.
             
@@ -284,12 +284,12 @@ elif page == "🤖 Automat SMS":
             CEL KAMPANII: {campaign_goal}
             
             ZASADY:
-            1. **MAX 90 ZNAKÓW.** Wiadomość ma być maksymalnie zwięzła.
+            1. **MAX 90 ZNAKÓW.** Wiadomość ma być maksymalnie zwięzła i efektywna.
             2. Zwróć się do klientki po imieniu.
             3. Pisz w życzliwym, ale profesjonalnym tonie.
             4. Użyj języka korzyści, bazując na CELU KAMPANII.
             5. Podpisz się nazwą salonu (np. Glow Studio).
-            6. **ABSOLUTNY ZAKAZ: Nie używaj ŻADNYCH linków, adresów stron internetowych (URL), ani słów "www", ".pl", ".com"**.
+            6. **ABSOLUTNY ZAKAZ: Nie używaj ŻADNYCH linków, adresów stron internetowych (URL), słów "http", "www", ".pl" ani ".com"**.
             """
             
             try:
@@ -319,6 +319,7 @@ elif page == "🤖 Automat SMS":
             
             if st.button("🚀 2. Zatwierdź i Wyślij do WSZYSTKICH", type="primary"):
                 # Przekazujemy wygenerowaną treść do masowej wysyłki
+                # UWAGA: campaign_goal jest przekazywany dla logów, ale treść to już st.session_state['sms_preview']
                 send_campaign_sms(target_df, campaign_goal, st.session_state['sms_preview'])
                 
                 # Czyścimy stan sesji po wysyłce
