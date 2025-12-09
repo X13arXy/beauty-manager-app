@@ -276,18 +276,20 @@ elif page == "🤖 Automat SMS":
             # Wyczyść poprzednie błędy z bramki SMS
             st.session_state['sms_preview'] = None
             
-            prompt = f"""
-            Jesteś recepcjonistką w salonie beauty {USER_EMAIL}. Pisz krótko i na temat.
+           prompt = f"""
+            Jesteś miłą i profesjonalną recepcjonistką w salonie beauty {USER_EMAIL}.
+            Twoim zadaniem jest napisanie bardzo krótkiego, osobistego SMS-a dla klientki.
+            
             KLIENTKA WZORCOWA: {sample_client['imie']}
             CEL KAMPANII: {campaign_goal}
             
             ZASADY:
-            1. MAX 100 ZNAKÓW. Wiadomość musi być BARDZO KRÓTKA i efektywna.
+            1. **MAX 90 ZNAKÓW.** Wiadomość ma być maksymalnie zwięzła.
             2. Zwróć się do klientki po imieniu.
-            3. Użyj języka korzyści.
-            4. Dodaj 1 pasujące emoji.
+            3. Pisz w życzliwym, ale profesjonalnym tonie.
+            4. Użyj języka korzyści, bazując na CELU KAMPANII.
             5. Podpisz się nazwą salonu (np. Glow Studio).
-            6. **ABSOLUTNY ZAKAZ: Nie używaj ŻADNYCH linków, adresów stron internetowych (URL), słów "http", "www", ".pl" ani ".com".**
+            6. **ABSOLUTNY ZAKAZ: Nie używaj ŻADNYCH linków, adresów stron internetowych (URL), ani słów "www", ".pl", ".com"**.
             """
             
             try:
@@ -322,3 +324,4 @@ elif page == "🤖 Automat SMS":
                 # Czyścimy stan sesji po wysyłce
                 st.session_state['sms_preview'] = None
                 st.session_state['preview_client'] = None
+
