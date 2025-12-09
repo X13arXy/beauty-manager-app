@@ -282,35 +282,42 @@ elif page == "🤖 Automat SMS":
                 
                 st.session_state['sms_preview'] = None
                 
-                # POPRAWIONY PROMPT (zamknięte cudzysłowy!)
+                # Uproszczony, stabilny prompt
                 prompt = f"""
                 Jesteś recepcjonistką w salonie: {salon_name}.
-                Twoim zadaniem jest napisanie krótkiego SMS-a.
-
-                KLIENTKA: {sample_client['imie']}
-                CEL: {campaign_goal}
-
-                ZASADY:
+                Napisz SMS do klientki {sample_client['imie']}.
+                Cel wiadomości: {campaign_goal}.
+                
+                Instrukcje:
                 1. Długość: maksymalnie 160 znaków.
                 2. Styl: miły, krótki, profesjonalny.
                 3. Podpis: {salon_name}.
-                4. Nie używaj linków internetowych.
-                5. Zamień polskie znaki (ą,ę,ć) na łacińskie (a,e,c), aby uniknąć błędów kodowania.
-                """ 
+                4. Ważne: Nie używaj linków internetowych.
+                5. Ważne: Zamień polskie znaki (ą,ę,ć) na łacińskie (a,e,c), aby uniknąć błędów kodowania.
+                """
                 
                 try:
+                    # Generacja treści
                     response = model.generate_content(prompt)
-                    raw_text = response.text.strip()
-                    clean_text = usun_ogonki(raw_text)
                     
-                    st.session_state['sms_preview'] = clean_text
-                    st.session_state['preview_client'] = sample_client['imie']
+                    # Sprawdzenie czy AI nie zablokowało treści
+                    if response.text:
+                        raw_text = response.text.strip()
+                        clean_text = usun_ogonki(raw_text) # Czyścimy ogonki kodem Python, nie tylko AI
+                        
+                        # Zapis do stanu sesji
+                        st.session_state['sms_preview'] = clean_text
+                        st.session_state['preview_client'] = sample_client['imie']
+                    else:
+                        st.error("AI zwróciło pustą odpowiedź (możliwa blokada filtra bezpieczeństwa).")
                 
                 except Exception as e:
-                     st.error(f"Błąd generacji AI: {e}")
+                     # Ten komunikat powie nam DOKŁADNIE co jest nie tak
+                     st.error(f"Szczegóły błędu: {e}")
                      st.session_state['sms_preview'] = "BŁĄD GENERACJI"
-                
-                st.rerun() 
+                     
+                st.rerun()
+
 
             # --- PODGLĄD I WYSYŁKA ---
             if st.session_state['sms_preview']:
@@ -331,4 +338,5 @@ elif page == "🤖 Automat SMS":
                     send_campaign_sms(target_df, campaign_goal, st.session_state['sms_preview'], is_test_mode)
                     st.session_state['sms_preview'] = None
                     st.session_state['preview_client'] = None
+
 
