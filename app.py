@@ -239,12 +239,13 @@ elif page == "🤖 Automat SMS":
                 Jesteś recepcjonistką w salonie: {salon_name}.
                 Napisz SMS do klientki {sample_client['imie']}.
                 Cel: {campaign_goal}.
-                Instrukcje:
-                1. Max 160 znaków.
-                2. Miły ton.
-                3. Podpis: {salon_name}.
-                4. ZERO linków.
-                5. ZERO polskich znaków (użyj a,e,s,c,z,l,o,n).
+                NSTRUKCJE:
+                
+                Zacznij od imienia.
+                Styl: Ciepły, miły, relacyjny (jak koleżanka do koleżanki, ale z szacunkiem).
+                Użyj języka korzyści (np. "poczuj się piękna", "zadbaj o siebie").
+                Podpisz się nazwą salonu.
+                Pisz poprawną polszczyzną (używaj ą, ę - my to potem zmienimy)."""
                 """
                 try:
                     res = model.generate_content(prompt)
@@ -267,5 +268,6 @@ elif page == "🤖 Automat SMS":
                 if st.button("🚀 2. Wyślij", type="primary" if not is_test else "secondary"):
                     send_campaign_sms(target_df, campaign_goal, st.session_state['sms_preview'], is_test)
                     st.session_state['sms_preview'] = None
+
 
 
