@@ -1,131 +1,9 @@
 import streamlit as st
 import pandas as pd
 import google.generativeai as genai
-import os
 import time
 from supabase import create_client, Client
-# ========================================================
-# 📂 ZAKŁADKA 1: BAZA KLIENTEK (Z OBSŁUGĄ VCF Z TELEFONU!)
-# ========================================================
-if page == "📂 Baza Klientek":
-    st.header("Twoja Baza")
 
-    # --- FUNKCJA DO CZYTANIA PLIKÓW VCF (Z TELEFONU) ---
-    def parse_vcf(file_content):
-        """Zamienia plik .vcf z telefonu na tabelę danych"""
-        content = file_content.decode("utf-8") # Czytamy plik jako tekst
-        contacts = []
-        current_contact = {}
-        
-        for line in content.splitlines():
-            if line.startswith("BEGIN:VCARD"):
-                current_contact = {}
-            elif line.startswith("FN:") or line.startswith("N:"): # Szukamy imienia
-                # Jeśli jeszcze nie mamy imienia w tym kontakcie
-                if "Imię" not in current_contact:
-                    parts = line.split(":", 1)[1]
-                    # Często VCF ma średniki w nazwie (Nazwisko;Imie), zamieniamy na spacje
-                    current_contact["Imię"] = parts.replace(";", " ").strip()
-            elif line.startswith("TEL"): # Szukamy telefonu
-                if "Telefon" not in current_contact: # Bierzemy pierwszy numer
-                    number = line.split(":", 1)[1]
-                    # Czyścimy numer z kresek i spacji
-                    clean_number = ''.join(filter(str.isdigit, number))
-                    if len(clean_number) > 9 and clean_number.startswith("48"):
-                        clean_number = clean_number # Jest ok
-                    elif len(clean_number) == 9:
-                        clean_number = "48" + clean_number # Dodajemy kierunkowy
-                    current_contact["Telefon"] = clean_number
-            elif line.startswith("END:VCARD"):
-                if "Imię" in current_contact and "Telefon" in current_contact:
-                    current_contact["Ostatni Zabieg"] = "Nieznany" # Domyślnie
-                    contacts.append(current_contact)
-        
-        return pd.DataFrame(contacts)
-
-    # --- SEKCJA IMPORTU ---
-    with st.expander("📥 IMPORT Z TELEFONU (Excel, CSV lub VCF)", expanded=False):
-        st.info("💡 Wgraj plik prosto z telefonu (format .vcf też działa!), a potem zaznacz klientki.")
-        
-        # Akceptujemy teraz też .vcf
-        uploaded_file = st.file_uploader("Wybierz plik", type=['xlsx', 'csv', 'vcf'])
-        
-        if uploaded_file:
-            try:
-                df_import = None
-                
-                # 1. ROZPOZNAWANIE FORMATU
-                if uploaded_file.name.endswith('.vcf'):
-                    # Używamy naszej nowej funkcji
-                    df_import = parse_vcf(uploaded_file.getvalue())
-                    if df_import.empty:
-                        st.error("Nie znaleziono kontaktów w pliku VCF.")
-                
-                elif uploaded_file.name.endswith('.csv'):
-                    df_import = pd.read_csv(uploaded_file)
-                else:
-                    df_import = pd.read_excel(uploaded_file)
-                
-                if df_import is not None and not df_import.empty:
-                    # Standaryzacja kolumn (jeśli to Excel/CSV)
-                    df_import.columns = [c.lower() for c in df_import.columns]
-                    
-                    # Szukamy kolumn (dla VCF nazwy są już dobre: "Imię", "Telefon")
-                    col_imie = next((c for c in df_import.columns if 'imi' in c or 'name' in c or 'nazw' in c), None)
-                    col_tel = next((c for c in df_import.columns if 'tel' in c or 'num' in c or 'pho' in c), None)
-
-                    if col_imie and col_tel:
-                        # Tworzymy tabelę podglądu
-                        df_to_show = pd.DataFrame({
-                            "Dodaj": True, 
-                            "Imię": df_import[col_imie],
-                            "Telefon": df_import[col_tel],
-                            "Ostatni Zabieg": "Nieznany"
-                        })
-
-                        st.markdown("### 🕵️‍♀️ Odznacz osoby prywatne:")
-                        
-                        # --- INTERAKTYWNA TABELA ---
-                        edited_df = st.data_editor(
-                            df_to_show,
-                            hide_index=True,
-                            use_container_width=True,
-                            column_config={
-                                "Dodaj": st.column_config.CheckboxColumn(
-                                    "Importuj?",
-                                    default=True,
-                                )
-                            }
-                        )
-                        
-                        # Zapisywanie
-                        to_import = edited_df[edited_df["Dodaj"] == True]
-                        count = len(to_import)
-                        
-                        if st.button(f"✅ ZAPISZ {count} KONTAKTÓW"):
-                            if count > 0:
-                                progress = st.progress(0)
-                                added = 0
-                                for idx, row in to_import.iterrows():
-                                    add_client(
-                                        str(row["Imię"]), 
-                                        str(row["Telefon"]), 
-                                        str(row["Ostatni Zabieg"]), 
-                                        "" 
-                                    )
-                                    added += 1
-                                    progress.progress(added / count)
-                                
-                                st.success(f"Sukces! Dodano {added} klientek.")
-                                time.sleep(1.5)
-                                st.rerun()
-                            else:
-                                st.warning("Nikogo nie zaznaczono!")
-                    else:
-                        st.error(f"Nie udało się odczytać kolumn. Spróbuj innego pliku.")
-            
-            except Exception as e:
-                st.error(f"Błąd pliku: {e}")
 # --- 1. KONFIGURACJA I CSS ---
 st.set_page_config(page_title="Beauty SaaS", page_icon="💅", layout="wide")
 
@@ -136,18 +14,14 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- ŁADOWANIE KLUCZY Z CHMURY ---
+# --- ŁADOWANIE KLUCZY ---
 try:
     SUPABASE_URL = st.secrets["SUPABASE_URL"]
     SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
     GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]
-    SMSAPI_TOKEN = st.secrets["SMSAPI_TOKEN"]
+    SMSAPI_TOKEN = st.secrets.get("SMSAPI_TOKEN", "")
 except KeyError as e:
     st.error(f"❌ Błąd: Brak klucza {e} w Streamlit Secrets!")
-    st.stop()
-
-if not all([SUPABASE_URL, SUPABASE_KEY, GOOGLE_API_KEY]):
-    st.error("❌ Błąd wartości! Jeden z kluczy jest pusty.")
     st.stop()
 
 # Inicjalizacja klientów
@@ -157,7 +31,7 @@ except Exception as e:
     st.error(f"❌ Błąd połączenia Supabase: {e}")
     st.stop()
 
-# Używamy stabilnego modelu 1.5 Flash
+# AI
 try:
     genai.configure(api_key=GOOGLE_API_KEY)
     model = genai.GenerativeModel('models/gemini-flash-latest')
@@ -169,7 +43,7 @@ try:
     from smsapi.client import SmsApiPlClient
     from smsapi.exception import SmsApiException
 except ImportError:
-    st.warning("Brak biblioteki smsapi-client.")
+    pass
 
 # --- 2. STAN SESJI ---
 if 'user' not in st.session_state: st.session_state['user'] = None
@@ -213,10 +87,8 @@ def logout_user():
     st.session_state['user'] = None
     st.rerun()
 
-# --- FUNKCJA WYSYŁAJĄCA SMS (NAPRAWIONA) ---
 def send_campaign_sms(target_df, campaign_goal, generated_text, is_test_mode):
-    
-    sms_token = st.secrets["SMSAPI_TOKEN"]
+    sms_token = st.secrets.get("SMSAPI_TOKEN", "")
     client = None
 
     if not is_test_mode:
@@ -231,15 +103,10 @@ def send_campaign_sms(target_df, campaign_goal, generated_text, is_test_mode):
 
     st.write("---")
     progress_bar = st.progress(0)
-    
-    # Pobieramy imię wzorcowe bezpiecznie
     preview_name = st.session_state.get('preview_client')
 
     for index, row in target_df.iterrows():
-        # Personalizacja - ZABEZPIECZONA PRZED BŁĘDEM
         final_text = generated_text
-        
-        # Tylko jeśli mamy imię wzorcowe i jest ono w tekście, to zamieniamy
         if preview_name and preview_name in generated_text:
              final_text = generated_text.replace(preview_name, row['imie'])
         
@@ -252,7 +119,7 @@ def send_campaign_sms(target_df, campaign_goal, generated_text, is_test_mode):
             try:
                 client.sms.send(to=row['telefon'], message=clean_text)
                 st.success(f"✅ Wysłano do: {row['imie']}")
-            except SmsApiException as e:
+            except Exception as e:
                 st.error(f"Błąd bramki SMS dla {row['imie']}: {e}")
             
         time.sleep(1)
@@ -261,8 +128,7 @@ def send_campaign_sms(target_df, campaign_goal, generated_text, is_test_mode):
     st.balloons()
     st.success("🎉 Kampania zakończona!")
 
-
-# --- 4. INTERFEJS ---
+# --- 4. EKRAN LOGOWANIA ---
 
 if not st.session_state['user']:
     col1, col2, col3 = st.columns([1, 2, 1])
@@ -279,7 +145,7 @@ if not st.session_state['user']:
             if st.button("Załóż konto"): register_user(r_email, r_pass)
     st.stop()
 
-# --- APLIKACJA ---
+# --- 5. APLIKACJA WŁAŚCIWA ---
 CURRENT_USER = st.session_state['user']
 SALON_ID = CURRENT_USER.id 
 USER_EMAIL = CURRENT_USER.email
@@ -289,7 +155,7 @@ with st.sidebar:
     if st.button("Wyloguj"): logout_user()
     st.divider()
 
-# Funkcje DB wewnątrz, żeby widziały SALON_ID
+# Funkcje DB
 def add_client(imie, telefon, zabieg, data):
     try:
         supabase.table("klientki").insert({
@@ -312,29 +178,148 @@ def delete_client(cid):
 st.title("Panel Salonu")
 page = st.sidebar.radio("Menu", ["📂 Baza Klientek", "🤖 Automat SMS"])
 
+# ========================================================
+# 📂 ZAKŁADKA 1: BAZA KLIENTEK (Z OBSŁUGĄ VCF Z TELEFONU!)
+# ========================================================
 if page == "📂 Baza Klientek":
     st.header("Twoja Baza")
-    with st.expander("➕ Dodaj klientkę"):
+
+    # --- FUNKCJA DO CZYTANIA PLIKÓW VCF (Z TELEFONU) ---
+    def parse_vcf(file_content):
+        try:
+            content = file_content.decode("utf-8")
+        except UnicodeDecodeError:
+            content = file_content.decode("latin-1") 
+            
+        contacts = []
+        current_contact = {}
+        
+        for line in content.splitlines():
+            if line.startswith("BEGIN:VCARD"):
+                current_contact = {}
+            elif line.startswith("FN:") or line.startswith("N:"): 
+                if "Imię" not in current_contact:
+                    parts = line.split(":", 1)[1]
+                    current_contact["Imię"] = parts.replace(";", " ").strip()
+            elif line.startswith("TEL"): 
+                if "Telefon" not in current_contact: 
+                    number = line.split(":", 1)[1]
+                    clean_number = ''.join(filter(str.isdigit, number))
+                    if len(clean_number) > 9 and clean_number.startswith("48"):
+                        clean_number = clean_number 
+                    elif len(clean_number) == 9:
+                        clean_number = "48" + clean_number 
+                    current_contact["Telefon"] = clean_number
+            elif line.startswith("END:VCARD"):
+                if "Imię" in current_contact and "Telefon" in current_contact:
+                    current_contact["Ostatni Zabieg"] = "Nieznany"
+                    contacts.append(current_contact)
+        
+        return pd.DataFrame(contacts)
+
+    # --- SEKCJA IMPORTU ---
+    with st.expander("📥 IMPORT Z TELEFONU (Wgraj plik)", expanded=False):
+        st.info("💡 Tu wgraj plik 'Kontakty.vcf' wysłany z telefonu lub Excela.")
+        
+        uploaded_file = st.file_uploader("Wybierz plik", type=['xlsx', 'csv', 'vcf'])
+        
+        if uploaded_file:
+            try:
+                df_import = None
+                
+                # 1. ROZPOZNAWANIE FORMATU
+                if uploaded_file.name.endswith('.vcf'):
+                    df_import = parse_vcf(uploaded_file.getvalue())
+                    if df_import.empty:
+                        st.warning("Plik VCF pusty lub błędny format.")
+                
+                elif uploaded_file.name.endswith('.csv'):
+                    df_import = pd.read_csv(uploaded_file)
+                else:
+                    df_import = pd.read_excel(uploaded_file)
+                
+                if df_import is not None and not df_import.empty:
+                    # Standaryzacja kolumn
+                    df_import.columns = [c.lower() for c in df_import.columns]
+                    
+                    col_imie = next((c for c in df_import.columns if 'imi' in c or 'name' in c or 'nazw' in c), None)
+                    col_tel = next((c for c in df_import.columns if 'tel' in c or 'num' in c or 'pho' in c), None)
+
+                    if col_imie and col_tel:
+                        # Tabela podglądu z checkboxami
+                        df_to_show = pd.DataFrame({
+                            "Dodaj": True, 
+                            "Imię": df_import[col_imie],
+                            "Telefon": df_import[col_tel],
+                            "Ostatni Zabieg": "Nieznany"
+                        })
+
+                        st.markdown("### 🕵️‍♀️ Odznacz osoby prywatne:")
+                        
+                        edited_df = st.data_editor(
+                            df_to_show,
+                            hide_index=True,
+                            use_container_width=True,
+                            column_config={
+                                "Dodaj": st.column_config.CheckboxColumn(
+                                    "Importuj?", default=True
+                                )
+                            }
+                        )
+                        
+                        # Zapisywanie
+                        to_import = edited_df[edited_df["Dodaj"] == True]
+                        count = len(to_import)
+                        
+                        if st.button(f"✅ ZAPISZ {count} KONTAKTÓW"):
+                            if count > 0:
+                                progress = st.progress(0)
+                                added = 0
+                                for idx, row in to_import.iterrows():
+                                    add_client(
+                                        str(row["Imię"]), str(row["Telefon"]), 
+                                        str(row["Ostatni Zabieg"]), "" 
+                                    )
+                                    added += 1
+                                    progress.progress(added / count)
+                                
+                                st.success(f"Sukces! Dodano {added} klientek.")
+                                time.sleep(1.5)
+                                st.rerun()
+                            else:
+                                st.warning("Nikogo nie zaznaczono!")
+                    else:
+                        st.error("Nie znaleziono kolumn Imię/Telefon.")
+            
+            except Exception as e:
+                st.error(f"Błąd pliku: {e}")
+
+    # --- RĘCZNE DODAWANIE ---
+    with st.expander("➕ Dodaj pojedynczo (Ręcznie)"):
         c1, c2 = st.columns(2)
         imie = c1.text_input("Imię")
         tel = c1.text_input("Telefon (48...)")
         zabieg = c2.text_input("Zabieg", "Manicure")
         data = c2.date_input("Data")
-        if st.button("Zapisz"):
+        if st.button("Zapisz ręcznie"):
             add_client(imie, tel, zabieg, data)
             st.rerun()
 
+    # --- LISTA KLIENTEK ---
     df = get_clients()
     if not df.empty:
         st.dataframe(df[['imie', 'telefon', 'ostatni_zabieg']], use_container_width=True)
         opts = df.set_index('id')['imie'].to_dict()
-        to_del = st.selectbox("Usuń:", options=opts.keys(), format_func=lambda x: opts[x])
+        to_del = st.selectbox("Usuń klientkę:", options=opts.keys(), format_func=lambda x: opts[x])
         if st.button("Usuń wybraną"):
             delete_client(to_del)
             st.rerun()
     else:
-        st.info("Baza pusta.")
+        st.info("Baza pusta. Użyj importu powyżej!")
 
+# ========================================================
+# 🤖 ZAKŁADKA 2: AUTOMAT SMS (BEZ ZMIAN)
+# ========================================================
 elif page == "🤖 Automat SMS":
     st.header("Generator SMS AI")
     df = get_clients()
@@ -360,17 +345,15 @@ elif page == "🤖 Automat SMS":
                 Jesteś recepcjonistką w salonie: {salon_name}.
                 Napisz SMS do klientki {sample_client['imie']}.
                 Cel: {campaign_goal}.
-                NSTRUKCJE:
-                
+                INSTRUKCJE:
                 Zacznij od imienia.
-                Styl: Ciepły, miły, relacyjny (jak koleżanka do koleżanki, ale z szacunkiem).
-                Użyj języka korzyści (np. "poczuj się piękna", "zadbaj o siebie").
+                Styl: Ciepły, miły, relacyjny.
+                Użyj języka korzyści.
                 Podpisz się nazwą salonu.
                 Pisz poprawną polszczyzną (używaj ą, ę - my to potem zmienimy).
-                LIMIT ZNAKÓW TO 160 NIGDY nie może być więcej
-                Odmieniaj zgodnie z imieniem męskim lub żeńskim
+                LIMIT ZNAKÓW TO 160.
+                Odmieniaj imiona.
                 """
-              
                 try:
                     res = model.generate_content(prompt)
                     if res.text:
@@ -392,10 +375,3 @@ elif page == "🤖 Automat SMS":
                 if st.button("🚀 2. Wyślij", type="primary" if not is_test else "secondary"):
                     send_campaign_sms(target_df, campaign_goal, st.session_state['sms_preview'], is_test)
                     st.session_state['sms_preview'] = None
-
-
-
-
-
-
-
