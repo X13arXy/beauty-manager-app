@@ -291,11 +291,11 @@ elif page == "🤖 Automat SMS":
                 CEL: {campaign_goal}
 
                 ZASADY:
-                1. MAX 160 ZNAKÓW.
-                2. Zwróć się do klientki po imieniu.
-                3. Pisz miło i zachęcająco.
-                4. PODPIS: Podpisz się DOKŁADNIE taką nazwą: "{salon_name}".
-                5. ZAKAZ: Żadnych polskich znaków (pisz a, e, s, c, z, l, o, n zamiast ą, ę...).
+                1. Długość: maksymalnie 160 znaków.
+                2. Styl: miły, krótki, profesjonalny.
+                3. Podpis: {salon_name}.
+                4. Nie używaj linków internetowych.
+                5. Zamień polskie znaki (ą,ę,ć) na łacińskie (a,e,c), aby uniknąć błędów kodowania.
                 """ 
                 
                 try:
@@ -331,3 +331,4 @@ elif page == "🤖 Automat SMS":
                     send_campaign_sms(target_df, campaign_goal, st.session_state['sms_preview'], is_test_mode)
                     st.session_state['sms_preview'] = None
                     st.session_state['preview_client'] = None
+
