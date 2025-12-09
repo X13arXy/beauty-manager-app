@@ -295,7 +295,8 @@ elif page == "🤖 Automat SMS":
                 2. Zwróć się do klientki po imieniu.
                 3. Pisz miło i zachęcająco.
                 4. PODPIS: Podpisz się DOKŁADNIE taką nazwą: "{salon_name}".
-                ""
+                5. ZAKAZ: Żadnych polskich znaków (pisz a, e, s, c, z, l, o, n zamiast ą, ę...).
+                """ 
                 
                 try:
                     response = model.generate_content(prompt)
