@@ -269,13 +269,13 @@ elif page == "🤖 Automat SMS":
         sample_client = target_df.iloc[0]
         st.info(f"Wybrano: {len(target_df)} osób. Wzór wiadomości zostanie wygenerowany dla: {sample_client['imie']}.")
         
-        
-        # --- KONTROLA JAKOŚCI TREŚCI (ETAP 1) ---
-        if st.button("🔍 1. Wygeneruj Podgląd", type="secondary"):
+  ---
+  
+         if st.button("🔍 1. Wygeneruj Podgląd", type="secondary"):
             
-            # Wyczyść poprzednie błędy z bramki SMS
-            st.session_state['sms_preview'] = None
+            sample_client = target_df.iloc[0] 
             
+      
            prompt = f"""
             Jesteś miłą i profesjonalną recepcjonistką w salonie beauty {USER_EMAIL}.
             Twoim zadaniem jest napisanie bardzo krótkiego, osobistego SMS-a dla klientki.
@@ -324,5 +324,6 @@ elif page == "🤖 Automat SMS":
                 # Czyścimy stan sesji po wysyłce
                 st.session_state['sms_preview'] = None
                 st.session_state['preview_client'] = None
+
 
 
