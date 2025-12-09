@@ -245,7 +245,10 @@ elif page == "🤖 Automat SMS":
                 Styl: Ciepły, miły, relacyjny (jak koleżanka do koleżanki, ale z szacunkiem).
                 Użyj języka korzyści (np. "poczuj się piękna", "zadbaj o siebie").
                 Podpisz się nazwą salonu.
-                Pisz poprawną polszczyzną (używaj ą, ę - my to potem zmienimy)."""
+                Pisz poprawną polszczyzną (używaj ą, ę - my to potem zmienimy).
+                LIMIT ZNAKÓW TO 160 NIGDY nie może być więcej
+                Odmieniaj zgodnie z imieniem męskim lub żeńskim np. imie Marek - byśmy byli zadowoleni jakbyś przyszedł do nas, imie - anna byśmy byli zadowoleni jakbyś przyszła do nas
+                """
               
                 try:
                     res = model.generate_content(prompt)
@@ -268,6 +271,7 @@ elif page == "🤖 Automat SMS":
                 if st.button("🚀 2. Wyślij", type="primary" if not is_test else "secondary"):
                     send_campaign_sms(target_df, campaign_goal, st.session_state['sms_preview'], is_test)
                     st.session_state['sms_preview'] = None
+
 
 
 
