@@ -102,20 +102,41 @@ if page == "📂 Baza Klientek":
                     })
                     edited_df = st.data_editor(df_to_show, hide_index=True, use_container_width=True)
                     
-                    if st.button(f"Zapisz wybrane"):
+                   if st.button(f"💾 Zapisz zaznaczone"):
                         to_import = edited_df[edited_df["Dodaj"] == True]
-                        prog_bar = st.progress(0)
-                        count = len(to_import)
-                        added = 0
                         
-                        for idx, row in to_import.iterrows():
-                            db.add_client(SALON_ID, str(row["Imię"]), str(row["Telefon"]), str(row["Zabieg"]), "")
-                            added += 1
-                            prog_bar.progress(added / count)
-                        
-                        st.success(f"Dodano {added} kontaktów!")
-                        time.sleep(1)
-                        st.rerun()
+                        if to_import.empty:
+                            st.warning("Nie zaznaczono żadnych osób!")
+                        else:
+                            prog_bar = st.progress(0)
+                            count = len(to_import)
+                            added = 0
+                            errors = 0
+                            
+                            for idx, row in to_import.iterrows():
+                                # Zmiana tutaj: przekazujemy None zamiast "" jako datę
+                                success = db.add_client(
+                                    SALON_ID, 
+                                    str(row["Imię"]), 
+                                    str(row["Telefon"]), 
+                                    str(row["Zabieg"]), 
+                                    None 
+                                )
+                                
+                                if success:
+                                    added += 1
+                                else:
+                                    errors += 1
+                                
+                                prog_bar.progress((idx + 1) / count)
+                            
+                            if errors > 0:
+                                st.warning(f"Zapisano {added} osób, ale wystąpiło {errors} błędów.")
+                            else:
+                                st.success(f"✅ Sukces! Dodano {added} klientek.")
+                            
+                            time.sleep(2) # Dajemy czas na przeczytanie komunikatu
+                            st.rerun()
                 else:
                     st.error("Nie rozpoznano kolumn Imię/Telefon.")
 
@@ -188,3 +209,4 @@ elif page == "🤖 Automat SMS":
                 st.balloons()
                 st.success("Wysłano!")
                 st.session_state['sms_preview'] = None
+
