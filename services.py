@@ -3,7 +3,7 @@ import google.generativeai as genai
 import pandas as pd
 import time
 
-# Próba importu biblioteki SMS (żeby aplikacja nie wywaliła się bez niej)
+# Próba importu biblioteki SMS
 try:
     from smsapi.client import SmsApiPlClient
 except ImportError:
@@ -12,8 +12,12 @@ except ImportError:
 # --- KONFIGURACJA AI ---
 def init_ai():
     try:
-        genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
-        return genai.GenerativeModel('models/gemini-1.5-flash-latest')
+        # Sprawdzamy czy klucz jest w secrets
+        if "GOOGLE_API_KEY" in st.secrets:
+            genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
+            return genai.GenerativeModel('models/gemini-1.5-flash-latest')
+        else:
+            return None
     except Exception as e:
         st.error(f"❌ Błąd Gemini: {e}")
         return None
@@ -60,14 +64,29 @@ def parse_vcf(file_content):
     return pd.DataFrame(contacts)
 
 # --- LOGIKA GENEROWANIA I WYSYŁKI ---
-def generate_single_message(salon_name, row, campaign_goal):
-    """Generuje treść dla jednej osoby"""
-    if not model: return f"Hej {row['imie']}, zapraszamy do {salon_name}!"
+
+# UWAGA: Zmieniono nazwę funkcji, aby pasowała do app.py
+def generate_sms_content(salon_name, client_data, campaign_goal):
+    """
+    Generuje treść SMS. 
+    Obsługuje zarówno 'row' (wiersz z DataFrame) jak i 'string' (samo imię dla podglądu).
+    """
+    
+    # 1. Rozpoznaj, czy client_data to wiersz (dict/Series) czy samo imię (str)
+    if isinstance(client_data, str):
+        imie = client_data
+        ostatni_zabieg = "nieznany"
+    else:
+        imie = client_data.get('imie', 'Klientko')
+        ostatni_zabieg = client_data.get('ostatni_zabieg', 'nieznany')
+
+    if not model: 
+        return usun_ogonki(f"Hej {imie}, zapraszamy do {salon_name}!")
     
     prompt = f"""
     Jesteś recepcjonistką w salonie: {salon_name}.
-    Napisz SMS do klientki: {row['imie']}.
-    Ostatni zabieg: {row['ostatni_zabieg']}.
+    Napisz SMS do klientki: {imie}.
+    Ostatni zabieg: {ostatni_zabieg}.
     Cel: {campaign_goal}.
     WYTYCZNE:
     1. Krótko, miło, styl relacyjny.
@@ -80,7 +99,7 @@ def generate_single_message(salon_name, row, campaign_goal):
         text = res.text.strip()
         return usun_ogonki(text)
     except:
-        return f"Czesc {row['imie']}! Zapraszamy do {salon_name}."
+        return usun_ogonki(f"Czesc {imie}! Zapraszamy do {salon_name}.")
 
 def send_sms_via_api(phone, message):
     """Wysyła SMS przez bramkę SMSAPI"""
