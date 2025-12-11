@@ -8,8 +8,12 @@ import random
 def init_ai():
     try:
         genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
-        # Używamy modelu Flash (jest szybki i wystarczająco kreatywny)
-        return genai.GenerativeModel('models/gemini-1.5-flash')
+        # Ustawiamy wyższą "temperaturę" (0.85), żeby AI było bardziej kreatywne i mniej "robotyczne"
+        config = genai.types.GenerationConfig(
+            temperature=0.85,
+            candidate_count=1
+        )
+        return genai.GenerativeModel('models/gemini-1.5-flash', generation_config=config)
     except Exception as e:
         st.error(f"Błąd konfiguracji AI: {e}")
         return None
@@ -18,72 +22,66 @@ model = init_ai()
 
 # --- NARZĘDZIA TECHNICZNE ---
 def usun_ogonki(tekst):
-    """Zamienia polskie znaki na łacińskie (dla tanich SMS)"""
+    """Zamienia polskie znaki na łacińskie"""
     mapa = {'ą': 'a', 'ć': 'c', 'ę': 'e', 'ł': 'l', 'ń': 'n', 'ó': 'o', 'ś': 's', 'ź': 'z', 'ż': 'z',
             'Ą': 'A', 'Ć': 'C', 'Ę': 'E', 'Ł': 'L', 'Ń': 'N', 'Ó': 'O', 'Ś': 'S', 'Ź': 'Z', 'Ż': 'Z'}
     for pl, latin in mapa.items():
         tekst = tekst.replace(pl, latin)
     return tekst
 
-def process_message(raw_text):
-    """Czyści tekst i pilnuje limitu"""
-    clean_text = usun_ogonki(raw_text)
-    if len(clean_text) > 160:
-        return clean_text[:157] + "..."
-    return clean_text
-
 def generate_single_message(salon_name, campaign_goal, client_name, last_treatment):
-    """Generuje UNIKALNĄ, ciepłą wiadomość dla konkretnej osoby"""
+    """Generuje UNIKALNĄ, ciepłą wiadomość."""
     
-    # Lista różnych stylów, żeby AI nie pisało w kółko tego samego
-    style = [
-        "Bardzo entuzjastyczny i radosny",
-        "Ciepły, spokojny i troskliwy",
-        "Krótki, konkretny, ale z uśmiechem",
-        "Pytający o samopoczucie i zapraszający"
+    # 1. Losujemy "Vibe" wiadomości, żeby każda była inna
+    vibe_list = [
+        "Entuzjastyczna i pełna energii (użyj wykrzyknika i ognia)",
+        "Ciepła, troskliwa i spokojna (jak dobra przyjaciółka)",
+        "Tajemnicza i intrygująca (zadaj pytanie)",
+        "Krótka, konkretna, ale bardzo miła"
     ]
-    wylosowany_styl = random.choice(style)
+    current_vibe = random.choice(vibe_list)
 
-    # PROMPT PREMIUM (Relacyjny)
+    # 2. Prompt nastawiony na relację
     prompt = f"""
-    Jesteś managerką relacji w salonie "{salon_name}". 
-    Twoim celem jest dbanie o klientki, nie tylko sprzedaż.
+    Jesteś właścicielką salonu "{salon_name}". Piszesz prywatnego SMS-a do swojej stałej klientki.
     
-    Napisz SMS do klientki: {client_name}.
-    Ostatnio była na: {last_treatment}.
+    KLIENTKA: {client_name}
+    BYŁA OSTATNIO NA: {last_treatment}
+    CEL WIADOMOŚCI: {campaign_goal}
     
-    CEL WIADOMOŚCI: {campaign_goal}.
+    TWÓJ STYL W TEJ WIADOMOŚCI: {current_vibe}.
     
-    TWOJE INSTRUKCJE (BARDZO WAŻNE):
-    1. Styl: {wylosowany_styl}.
-    2. Pisz jak człowiek do człowieka (koleżanka do koleżanki). Unikaj korporacyjnego języka.
-    3. Zacznij od imienia w wołaczu (np. "Cześć Kasiu!", "Dzień dobry Aniu").
-    4. Jeśli to pasuje do celu, nawiąż delikatnie do ostatniego zabiegu ({last_treatment}), np. "jak tam Twoje rzęsy?".
-    5. Dodaj 1 lub 2 emoji pasujące do treści (np. 💅, 🌸, ✨, ☕).
-    6. Podpisz się nazwą salonu.
-    7. Pisz normalnie po polsku (z ą, ę) - system sam usunie ogonki.
-    8. Całość musi mieć MAX 150 znaków.
+    ZASADY (BEZWZGLĘDNE):
+    1. Zacznij od imienia w WOŁACZU (np. "Hej Aniu!", "Cześć Kasiu").
+    2. Pisz LUŹNO. Unikaj słów typu "zapraszamy do skorzystania", "oferujemy". Zamiast tego pisz: "wpadnij", "mamy coś ekstra".
+    3. Jeśli to pasuje, nawiąż do ostatniego zabiegu (np. "jak się trzymają paznokcie?").
+    4. Dodaj 1-2 emoji pasujące do stylu.
+    5. Podpisz się tylko nazwą salonu.
+    6. Pisz poprawną polszczyzną (ogonki usuniemy sami).
+    7. Max 160 znaków.
     """
     
+    # Wyłączenie filtrów bezpieczeństwa
     safety = [{"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"}]
 
     try:
-        # Retry logic (3 próby)
-        for _ in range(3):
+        # Próbujemy 3 razy (Retry Logic)
+        for attempt in range(3):
             try:
                 res = model.generate_content(prompt, safety_settings=safety)
                 raw_text = res.text.strip()
                 # Czyścimy technicznie
-                return process_message(raw_text)
-            except:
-                time.sleep(1)
+                return usun_ogonki(raw_text)
+            except Exception as e:
+                # Jeśli błąd limitów (429), czekamy dłużej
+                time.sleep(2 + attempt) 
         
-        # Fallback (Gdyby AI padło)
-        return usun_ogonki(f"Czesc {client_name}! {campaign_goal}. Pozdrawiamy, {salon_name}") 
+        # Fallback (Gdyby AI padło 3 razy)
+        return usun_ogonki(f"Czesc {client_name}! {campaign_goal}. Sciskamy, {salon_name}") 
     except:
-        return usun_ogonki(f"Czesc {client_name}! {campaign_goal}. Pozdrawiamy, {salon_name}")
+        return usun_ogonki(f"Czesc {client_name}! {campaign_goal}. Sciskamy, {salon_name}")
 
-# --- IMPORT Z TELEFONU (BEZ ZMIAN) ---
+# --- IMPORT (BEZ ZMIAN) ---
 def parse_vcf(file_content):
     try:
         content = file_content.decode("utf-8")
@@ -108,4 +106,3 @@ def parse_vcf(file_content):
                 current["Ostatni Zabieg"] = "Nieznany"
                 contacts.append(current)
     return pd.DataFrame(contacts)
-
