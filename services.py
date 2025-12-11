@@ -15,7 +15,7 @@ def init_ai():
         if "GOOGLE_API_KEY" in st.secrets:
             genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
             # ZMIANA: Używamy wersji stabilnej (większe limity)
-            return genai.GenerativeModel('gemini-exp-1206')
+            return genai.GenerativeModel('gemini-2.0-flash-lite-preview-02-05')
         else:
             return None
     except Exception as e:
