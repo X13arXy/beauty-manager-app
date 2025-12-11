@@ -123,7 +123,14 @@ def send_campaign_sms(target_df, campaign_goal, generated_text, is_test_mode):
                 st.error(f"Błąd bramki SMS dla {row['imie']}: {e}")
             
         time.sleep(1)
-        progress_bar.progress((index + 1) / len(target_df))
+       # Oblicz postęp
+progress_value = (index + 1) / len(target_df)
+
+# Zabezpiecz, aby nie przekroczyło 1.0
+progress_value = min(progress_value, 1.0)
+
+# Aktualizuj pasek
+progress_bar.progress(progress_value)
     
     st.balloons()
     st.success("🎉 Kampania zakończona!")
@@ -375,3 +382,4 @@ elif page == "🤖 Automat SMS":
                 if st.button("🚀 2. Wyślij", type="primary" if not is_test else "secondary"):
                     send_campaign_sms(target_df, campaign_goal, st.session_state['sms_preview'], is_test)
                     st.session_state['sms_preview'] = None
+
