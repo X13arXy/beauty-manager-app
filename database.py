@@ -2,23 +2,19 @@ import streamlit as st
 from supabase import create_client, Client
 import pandas as pd
 
-# --- KONFIGURACJA SUPABASE ---
+# --- INICJALIZACJA BAZY ---
 def init_supabase():
     try:
         url = st.secrets["SUPABASE_URL"]
         key = st.secrets["SUPABASE_KEY"]
         return create_client(url, key)
-    except KeyError:
-        st.error("❌ Błąd: Brak kluczy SUPABASE w secrets.toml!")
-        st.stop()
     except Exception as e:
         st.error(f"❌ Błąd połączenia z bazą: {e}")
         st.stop()
 
-# Inicjalizacja klienta (globalna dla modułu)
 supabase: Client = init_supabase()
 
-# --- AUTORYZACJA ---
+# --- LOGOWANIE I REJESTRACJA ---
 def login_user(email, password):
     try:
         response = supabase.auth.sign_in_with_password({"email": email, "password": password})
@@ -39,38 +35,37 @@ def logout_user():
     supabase.auth.sign_out()
 
 # --- OPERACJE NA DANYCH (CRUD) ---
-def add_client(salon_id, imie, telefon, zabieg, data=None):
-    try:
-        # Tworzymy słownik danych
-        payload = {
-            "salon_id": salon_id, 
-            "imie": imie, 
-            "telefon": telefon,
-            "ostatni_zabieg": zabieg
-        }
-        
-        # Dodajemy datę tylko, jeśli faktycznie istnieje (nie jest pusta ani None)
-        if data and str(data).strip() != "":
-            payload["data_wizyty"] = str(data)
-        else:
-            payload["data_wizyty"] = None  # To wyśle NULL do bazy SQL
 
-        supabase.table("klientki").insert(payload).execute()
-        return True
+# To jest ta poprawiona funkcja, o którą prosiłeś:
+def add_client(salon_id, imie, telefon, zabieg, data):
+    # Czyścimy numer telefonu z myślników i spacji
+    clean_tel = ''.join(filter(str.isdigit, str(telefon)))
+    
+    # Tu jest Twój FIX na daty (None zamiast pustego stringa)
+    data_val = str(data) if data and str(data).strip() != "" else None
+    
+    try:
+        supabase.table("klientki").insert({
+            "salon_id": salon_id, 
+            "imie": str(imie), 
+            "telefon": clean_tel,
+            "ostatni_zabieg": str(zabieg), 
+            "data_wizyty": data_val
+        }).execute()
+        return True, ""
     except Exception as e:
-        st.error(f"❌ Błąd zapisu do bazy: {e}") # To pozwoli zobaczyć konkretny błąd
-        return False
+        return False, str(e)
 
 def get_clients(salon_id):
     try:
         res = supabase.table("klientki").select("*").eq("salon_id", salon_id).execute()
         return pd.DataFrame(res.data)
-    except Exception as e:
+    except:
         return pd.DataFrame()
 
 def delete_client(client_id, salon_id):
     try:
         supabase.table("klientki").delete().eq("id", client_id).eq("salon_id", salon_id).execute()
         return True
-    except Exception:
+    except:
         return False
