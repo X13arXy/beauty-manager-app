@@ -28,6 +28,7 @@ except ImportError:
 # --- STAN SESJI ---
 if 'user' not in st.session_state: st.session_state['user'] = None
 if 'salon_name' not in st.session_state: st.session_state['salon_name'] = ""
+if 'preview_messages' not in st.session_state: st.session_state['preview_messages'] = None
 
 # --- LOGOWANIE ---
 if not st.session_state['user']:
@@ -117,61 +118,90 @@ elif page == "🤖 Automat SMS":
         
         wyb = st.multiselect("Do kogo?", df['imie'].tolist(), default=df['imie'].tolist())
         target = df[df['imie'].isin(wyb)]
-        
-        if salon and cel and not target.empty:
-            st.info(f"Wybrano {len(target)} osób. AI wygeneruje UNIKALNĄ treść dla każdej z nich.")
-            
-            mode = st.radio("Tryb:", ["🧪 Test (Symulacja)", "💸 Produkcja (Płatny SMSAPI)"])
-            is_test = (mode == "🧪 Test (Symulacja)")
-            
-            if st.button("🚀 GENERUJ I WYŚLIJ (LIVE)", type="primary"):
-                
-                # SMSAPI
-                client = None
-                if not is_test:
-                    token = st.secrets.get("SMSAPI_TOKEN", "")
-                    if not token:
-                        st.error("Brak tokenu SMSAPI!")
-                        st.stop()
-                    try:
-                        client = SmsApiPlClient(access_token=token)
-                    except:
-                        st.error("Błąd SMSAPI")
-                        st.stop()
-                
-                st.write("---")
-                st.subheader("📨 Podgląd wysyłki na żywo:")
-                
+        id_col = 'id' if 'id' in target.columns else None
+        selection_signature = sorted(target[id_col].tolist()) if id_col else sorted(target.index.tolist())
+        preview_state = st.session_state.get('preview_messages')
+        preview_valid = (
+            preview_state
+            and preview_state.get("generated_for") == selection_signature
+            and preview_state.get("salon") == salon
+            and preview_state.get("goal") == cel
+        )
+
+        st.info(f"Wybrano {len(target)} osób. AI wygeneruje UNIKALNĄ treść dla każdej z nich.")
+        mode = st.radio("Tryb:", ["🧪 Test (Symulacja)", "💸 Produkcja (Płatny SMSAPI)"])
+        is_test = (mode == "🧪 Test (Symulacja)")
+
+        if st.button("📄 GENERUJ PODGLĄD", type="secondary"):
+            preview_msgs = []
+            for idx, row in target.iterrows():
+                with st.spinner(f"AI pisze do: {row['imie']}..."):
+                    msg = utils.generate_single_message(salon, cel, row['imie'], row['ostatni_zabieg'])
+                row_id = row["id"] if id_col else idx
+                preview_msgs.append({
+                    "id": row_id,
+                    "imie": row["imie"],
+                    "telefon": row["telefon"],
+                    "message": msg
+                })
+            st.session_state['preview_messages'] = {
+                "generated_for": selection_signature,
+                "salon": salon,
+                "goal": cel,
+                "messages": preview_msgs
+            }
+            preview_state = st.session_state['preview_messages']
+            preview_valid = True
+
+        if preview_state:
+            if preview_valid:
+                st.subheader("📄 Podgląd wiadomości")
+                for entry in preview_state["messages"]:
+                    with st.chat_message("assistant"):
+                        st.write(f"**Do: {entry['imie']}** ({entry['telefon']})")
+                        st.code(entry["message"], language='text')
+                st.success("Podgląd aktualny. Możesz wysłać.")
+            else:
+                st.info("Podgląd nieaktualny po zmianach. Wygeneruj ponownie, aby wysłać.")
+
+        if preview_valid and st.button("🚀 WYŚLIJ PODGLĄD (LIVE)", type="primary"):
+            client = None
+            if not is_test:
+                token = st.secrets.get("SMSAPI_TOKEN", "")
+                if not token:
+                    st.error("Brak tokenu SMSAPI!")
+                    st.stop()
+                try:
+                    client = SmsApiPlClient(access_token=token)
+                except:
+                    st.error("Błąd SMSAPI")
+                    st.stop()
+
+            st.write("---")
+            st.subheader("📨 Podgląd wysyłki na żywo:")
+            messages = preview_state["messages"]
+            if not messages:
+                st.warning("Brak wiadomości w podglądzie. Wygeneruj ponownie.")
+            else:
                 bar = st.progress(0.0)
-                log_box = st.container() # Tu będą wpadać wiadomości
-                
-                for i, (idx, row) in enumerate(target.iterrows()):
-                    
-                    # 1. GENEROWANIE (Tu dzieje się magia różnorodności)
-                    with st.spinner(f"AI pisze do: {row['imie']}..."):
-                        msg = utils.generate_single_message(salon, cel, row['imie'], row['ostatni_zabieg'])
-                    
-                    # 2. WYSYŁKA I WYŚWIETLENIE
+                log_box = st.container()
+                total = len(messages)
+                for i, entry in enumerate(messages):
+                    msg = entry["message"]
                     with log_box:
                         with st.chat_message("assistant"):
-                            st.write(f"**Do: {row['imie']}** ({row['telefon']})")
+                            st.write(f"**Do: {entry['imie']}** ({entry['telefon']})")
                             st.code(msg, language='text')
-                            
                             if is_test:
                                 st.caption("✅ Symulacja OK")
                             else:
                                 try:
-                                    client.sms.send(to=str(row['telefon']), message=msg)
+                                    client.sms.send(to=str(entry['telefon']), message=msg)
                                     st.caption("✅ Wysłano SMS")
                                 except Exception as e:
                                     st.error(f"Błąd wysyłki: {e}")
-                    
-                    # Czekamy, żeby AI mogło pomyśleć przy następnym i żeby Google nie zablokowało
-                    time.sleep(3) 
-                    bar.progress((i+1)/len(target))
-                
+                    time.sleep(2)
+                    bar.progress((i+1)/total)
                 st.balloons()
                 st.success("Zakończono!")
-
-
-
+                st.session_state['preview_messages'] = None
