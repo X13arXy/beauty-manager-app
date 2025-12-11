@@ -3,43 +3,24 @@ import google.generativeai as genai
 import pandas as pd
 import time
 
-# Import biblioteki SMSAPI (opcjonalny, z obsługą błędu)
+# Próba importu biblioteki SMS (żeby aplikacja nie wywaliła się bez niej)
 try:
     from smsapi.client import SmsApiPlClient
 except ImportError:
     pass
 
-# --- AI GEMINI ---
+# --- KONFIGURACJA AI ---
 def init_ai():
     try:
         genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
-        return genai.GenerativeModel('models/gemini-flash-latest')
+        return genai.GenerativeModel('models/gemini-1.5-flash-latest')
     except Exception as e:
-        st.error(f"❌ Błąd konfiguracji Gemini: {e}")
+        st.error(f"❌ Błąd Gemini: {e}")
         return None
 
 model = init_ai()
 
-def generate_sms_content(salon_name, client_name, goal):
-    if not model: return None
-    
-    prompt = f"""
-    Jesteś recepcjonistką w salonie: {salon_name}.
-    Napisz SMS do klientki {client_name}.
-    Cel: {goal}.
-    INSTRUKCJE:
-    Zacznij od imienia. Styl: Ciepły, miły. Użyj języka korzyści.
-    Podpisz się nazwą salonu. Pisz poprawną polszczyzną.
-    LIMIT ZNAKÓW TO 160.
-    """
-    try:
-        res = model.generate_content(prompt)
-        return usun_ogonki(res.text.strip()) if res.text else None
-    except Exception as e:
-        st.error(f"Błąd AI: {e}")
-        return None
-
-# --- NARZĘDZIA ---
+# --- FUNKCJE POMOCNICZE (Tekst i Pliki) ---
 def usun_ogonki(tekst):
     mapa = {'ą': 'a', 'ć': 'c', 'ę': 'e', 'ł': 'l', 'ń': 'n', 'ó': 'o', 'ś': 's', 'ź': 'z', 'ż': 'z',
             'Ą': 'A', 'Ć': 'C', 'Ę': 'E', 'Ł': 'L', 'Ń': 'N', 'Ó': 'O', 'Ś': 'S', 'Ź': 'Z', 'Ż': 'Z'}
@@ -47,8 +28,8 @@ def usun_ogonki(tekst):
         tekst = tekst.replace(pl, latin)
     return tekst
 
-# --- PARSOWANIE VCF ---
 def parse_vcf(file_content):
+    """Import kontaktów z pliku VCF"""
     try:
         content = file_content.decode("utf-8")
     except UnicodeDecodeError:
@@ -68,7 +49,7 @@ def parse_vcf(file_content):
             if "Telefon" not in current_contact: 
                 number = line.split(":", 1)[1]
                 clean_number = ''.join(filter(str.isdigit, number))
-                if len(clean_number) > 9 and clean_number.startswith("48"): pass 
+                if len(clean_number) > 9 and clean_number.startswith("48"): pass
                 elif len(clean_number) == 9: clean_number = "48" + clean_number 
                 current_contact["Telefon"] = clean_number
         elif line.startswith("END:VCARD"):
@@ -78,41 +59,37 @@ def parse_vcf(file_content):
     
     return pd.DataFrame(contacts)
 
-# --- WYSYŁKA SMS (LOGIKA) ---
-def send_campaign_logic(target_df, generated_text, is_test_mode, progress_bar, preview_name):
-    sms_token = st.secrets.get("SMSAPI_TOKEN", "")
-    client = None
-
-    if not is_test_mode:
-        if not sms_token:
-            st.error("❌ Brak tokenu SMSAPI!")
-            return
-        try:
-            client = SmsApiPlClient(access_token=sms_token)
-        except Exception as e:
-            st.error(f"Błąd logowania SMSAPI: {e}")
-            return
-
-    total = len(target_df)
+# --- LOGIKA GENEROWANIA I WYSYŁKI ---
+def generate_single_message(salon_name, row, campaign_goal):
+    """Generuje treść dla jednej osoby"""
+    if not model: return f"Hej {row['imie']}, zapraszamy do {salon_name}!"
     
-    for index, row in target_df.iterrows():
-        # Personalizacja
-        final_text = generated_text
-        if preview_name and preview_name in generated_text:
-            final_text = generated_text.replace(preview_name, row['imie'])
-        
-        clean_text = usun_ogonki(final_text)
+    prompt = f"""
+    Jesteś recepcjonistką w salonie: {salon_name}.
+    Napisz SMS do klientki: {row['imie']}.
+    Ostatni zabieg: {row['ostatni_zabieg']}.
+    Cel: {campaign_goal}.
+    WYTYCZNE:
+    1. Krótko, miło, styl relacyjny.
+    2. Bez polskich znaków (usuń ogonki).
+    3. Podpisz się: {salon_name}.
+    4. Max 150 znaków.
+    """
+    try:
+        res = model.generate_content(prompt)
+        text = res.text.strip()
+        return usun_ogonki(text)
+    except:
+        return f"Czesc {row['imie']}! Zapraszamy do {salon_name}."
 
-        if is_test_mode:
-            print(f"[TEST] Do: {row['telefon']} | {clean_text}")
-        else:
-            try:
-                client.sms.send(to=row['telefon'], message=clean_text)
-            except Exception as e:
-                st.error(f"Błąd wysyłki do {row['imie']}: {e}")
-
-        time.sleep(1) # Ważne opóźnienie
-        
-        # Aktualizacja paska postępu
-        prog = min((index + 1) / total, 1.0)
-        progress_bar.progress(prog)
+def send_sms_via_api(phone, message):
+    """Wysyła SMS przez bramkę SMSAPI"""
+    token = st.secrets.get("SMSAPI_TOKEN", "")
+    if not token: return False, "Brak tokenu"
+    
+    try:
+        client = SmsApiPlClient(access_token=token)
+        client.sms.send(to=str(phone), message=message)
+        return True, "OK"
+    except Exception as e:
+        return False, str(e)
