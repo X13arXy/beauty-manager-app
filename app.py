@@ -70,14 +70,17 @@ st.title("Panel Salonu")
 page = st.sidebar.radio("Menu", ["📂 Baza Klientek", "🤖 Automat SMS"])
 
 # --- ZAKŁADKA: BAZA KLIENTEK ---
+# --- ZAKŁADKA: BAZA KLIENTEK ---
 if page == "📂 Baza Klientek":
     st.header("Twoja Baza")
 
     # Import
     with st.expander("📥 IMPORT (VCF/Excel)", expanded=False):
         uploaded_file = st.file_uploader("Wgraj plik", type=['xlsx', 'csv', 'vcf'])
+        
         if uploaded_file:
             df_import = None
+            # Rozpoznawanie pliku
             if uploaded_file.name.endswith('.vcf'):
                 df_import = srv.parse_vcf(uploaded_file.getvalue())
             elif uploaded_file.name.endswith('.csv'):
@@ -88,59 +91,54 @@ if page == "📂 Baza Klientek":
             if df_import is not None and not df_import.empty:
                 # Standaryzacja nazw kolumn
                 df_import.columns = [c.lower() for c in df_import.columns]
-                # Szukanie kolumn
+                
+                # Szukanie odpowiednich kolumn
                 col_imie = next((c for c in df_import.columns if 'imi' in c or 'name' in c), None)
                 col_tel = next((c for c in df_import.columns if 'tel' in c or 'num' in c), None)
 
                 if col_imie and col_tel:
-                    # Wybór kontaktów
+                    # Przygotowanie tabeli do edycji
                     df_to_show = pd.DataFrame({
                         "Dodaj": True, 
                         "Imię": df_import[col_imie],
                         "Telefon": df_import[col_tel],
                         "Zabieg": "Nieznany"
                     })
+                    
+                    st.write("Edytuj listę przed importem:")
                     edited_df = st.data_editor(df_to_show, hide_index=True, use_container_width=True)
                     
-                   if st.button(f"💾 Zapisz zaznaczone"):
+                    # --- TUTAJ BYŁ BŁĄD WCIĘCIA ---
+                    # Ten przycisk musi być równo z linią 'edited_df =' powyżej
+                    if st.button(f"💾 Zapisz zaznaczone"):
                         to_import = edited_df[edited_df["Dodaj"] == True]
                         
                         if to_import.empty:
-                            st.warning("Nie zaznaczono żadnych osób!")
+                            st.warning("Nie zaznaczono nikogo do importu.")
                         else:
                             prog_bar = st.progress(0)
                             count = len(to_import)
                             added = 0
-                            errors = 0
                             
                             for idx, row in to_import.iterrows():
-                                # Zmiana tutaj: przekazujemy None zamiast "" jako datę
-                                success = db.add_client(
+                                # Używamy poprawionej wersji z None zamiast ""
+                                db.add_client(
                                     SALON_ID, 
                                     str(row["Imię"]), 
                                     str(row["Telefon"]), 
                                     str(row["Zabieg"]), 
-                                    None 
+                                    None
                                 )
-                                
-                                if success:
-                                    added += 1
-                                else:
-                                    errors += 1
-                                
+                                added += 1
                                 prog_bar.progress((idx + 1) / count)
                             
-                            if errors > 0:
-                                st.warning(f"Zapisano {added} osób, ale wystąpiło {errors} błędów.")
-                            else:
-                                st.success(f"✅ Sukces! Dodano {added} klientek.")
-                            
-                            time.sleep(2) # Dajemy czas na przeczytanie komunikatu
+                            st.success(f"Dodano {added} kontaktów!")
+                            time.sleep(1.5)
                             st.rerun()
                 else:
-                    st.error("Nie rozpoznano kolumn Imię/Telefon.")
+                    st.error("Nie rozpoznano kolumn Imię/Telefon w pliku.")
 
-    # Tabela
+    # Tabela wyświetlania bazy (poza expanderem)
     df = db.get_clients(SALON_ID)
     if not df.empty:
         st.dataframe(df[['imie', 'telefon', 'ostatni_zabieg']], use_container_width=True)
@@ -152,7 +150,6 @@ if page == "📂 Baza Klientek":
             st.rerun()
     else:
         st.info("Baza pusta.")
-
 # --- ZAKŁADKA: AUTOMAT SMS ---
 elif page == "🤖 Automat SMS":
     st.header("Generator SMS AI")
@@ -209,4 +206,5 @@ elif page == "🤖 Automat SMS":
                 st.balloons()
                 st.success("Wysłano!")
                 st.session_state['sms_preview'] = None
+
 
