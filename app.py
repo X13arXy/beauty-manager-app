@@ -182,7 +182,7 @@ elif page == "🤖 Kampania SMS":
                         st.error("Błąd logowania SMSAPI")
                         st.stop()
                 
-               st.write("---")
+              
                 st.subheader("📨 Raport Wysyłki na Żywo:")
                 
                 # Pasek postępu
@@ -220,3 +220,4 @@ elif page == "🤖 Kampania SMS":
                 st.balloons()
                 st.success(f"🎉 Zakończono! Wysłano pomyślnie: {ok_count} wiadomości.")
                 st.session_state['preview_msg'] = None
+
