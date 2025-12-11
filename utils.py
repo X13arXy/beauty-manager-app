@@ -3,24 +3,53 @@ import pandas as pd
 import random
 import streamlit as st
 
-# --- 1. KONFIGURACJA AI (Z ZABEZPIECZENIEM) ---
+# --- 1. KONFIGURACJA AI (PĘTLA SZUKAJĄCA) ---
 def init_ai():
-    # Sprawdzamy czy w ogóle jest klucz
+    # 1. Sprawdź czy klucz istnieje
     if "GOOGLE_API_KEY" not in st.secrets:
+        st.error("Brak klucza API w secrets.toml!")
         return None
 
-    try:
-        genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
-        # Próbujemy zainicjować model Flash (jest najnowszy i darmowy)
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        return model
-    except Exception:
-        # Jeśli cokolwiek pójdzie nie tak, zwracamy None (co uruchomi tryb symulacji)
-        return None
+    api_key = st.secrets["GOOGLE_API_KEY"]
+    genai.configure(api_key=api_key)
+
+    # 2. LISTA WSZYSTKICH MOŻLIWYCH NAZW (Od najnowszych)
+    # Kod będzie próbował każdą po kolei, aż któraś zadziała.
+    lista_modeli = [
+        "gemini-1.5-flash",          # Standardowa nazwa
+        "gemini-1.5-flash-latest",   # Wersja "Latest" o której wspominałeś
+        "gemini-1.5-flash-001",      # Wersja numerowana
+        "gemini-1.5-pro",            # Wersja Pro (mocniejsza)
+        "gemini-pro",                # Klasyk (stary, ale jary)
+        "models/gemini-1.5-flash"    # Czasem wymagany jest przedrostek
+    ]
+
+    for nazwa in lista_modeli:
+        try:
+            # Próba inicjalizacji
+            model = genai.GenerativeModel(nazwa)
+            
+            # TEST POŁĄCZENIA (Ważne!)
+            # Próbujemy wygenerować jedno słowo, żeby upewnić się, że to naprawdę działa
+            # Jeśli tu wystąpi błąd, kod przeskoczy do 'except' i spróbuje następny model
+            test_response = model.generate_content("Test", request_options={"timeout": 5})
+            
+            if test_response:
+                print(f"✅ SUKCES! Połączono z modelem: {nazwa}")
+                return model
+                
+        except Exception as e:
+            # Jeśli ten model nie działa, logujemy to w konsoli i idziemy dalej
+            print(f"⚠️ Model {nazwa} nie odpowiada: {e}")
+            continue
+
+    # Jeśli pętla się skończy i nic nie zadziałało:
+    print("❌ Żaden model nie zadziałał.")
+    return None
 
 model = init_ai()
 
-# --- 2. NARZĘDZIA ---
+# --- 2. NARZĘDZIA POMOCNICZE ---
 def usun_ogonki(tekst):
     mapa = {'ą': 'a', 'ć': 'c', 'ę': 'e', 'ł': 'l', 'ń': 'n', 'ó': 'o', 'ś': 's', 'ź': 'z', 'ż': 'z',
             'Ą': 'A', 'Ć': 'C', 'Ę': 'E', 'Ł': 'L', 'Ń': 'N', 'Ó': 'O', 'Ś': 'S', 'Ź': 'Z', 'Ż': 'Z'}
@@ -55,48 +84,46 @@ def parse_vcf(file_content):
                 current["Telefon"] = clean
         elif line.startswith("END:VCARD"):
             if "Imię" in current and "Telefon" in current:
-                current["Ostatni Zabieg"] = "Import z pliku"
+                current["Ostatni Zabieg"] = "Import"
                 contacts.append(current)
     return pd.DataFrame(contacts)
 
-# --- 3. GENEROWANIE WIADOMOŚCI (HYBRYDOWE) ---
+# --- 3. FUNKCJA GENERUJĄCA ---
 def generate_single_message_debug(salon_name, campaign_goal, client_name, last_treatment):
     
-    # --- OPCJA A: PRAWDZIWE AI (JEŚLI DZIAŁA) ---
-    if model:
-        vibe_list = ["Energiczna kolezanka", "Ciepła i troskliwa", "Konkretna"]
-        current_vibe = random.choice(vibe_list)
+    # Jeśli model nie został znaleziony w pętli init_ai
+    if not model:
+        return None, "Brak połączonego modelu", "⚠️ Działam w trybie OFFLINE (Sprawdź logi, żaden z 6 modeli nie zadziałał)"
 
-        prompt = f"""
-        Jesteś: {salon_name}. SMS do: {client_name}.
-        Cel: {campaign_goal}. Zabieg: {last_treatment}.
-        Styl: {current_vibe}.
-        1. Wołacz imienia (np. Aniu).
-        2. Max 160 znaków.
-        3. Bez ogonków.
-        """
-        safety = [{"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"}]
-        
-        try:
-            res = model.generate_content(prompt, safety_settings=safety)
-            if res.text:
-                return process_message(res.text.strip()), prompt, None
-        except Exception as e:
-            # Jeśli AI rzuci błędem (404, 429), nie panikujemy -> idziemy do Opcji B
-            print(f"Awaria AI: {e}")
-            pass 
-
-    # --- OPCJA B: SYMULACJA AI (DARMOWA I NIEZAWODNA) ---
-    # To się uruchomi, jeśli klucz nie działa lub Google rzuci błędem
-    
-    # Prosta "sztuczna inteligencja" na piechotę ;)
-    szablony = [
-        f"Czesc {client_name}! {campaign_goal}. Wpadnij na chwile relaksu do {salon_name}!",
-        f"Hejka {client_name}! Dawno Cie nie bylo. {campaign_goal} czeka w {salon_name}.",
-        f"Dzien dobry {client_name}. Mamy cos specjalnego: {campaign_goal}. Zapraszamy, {salon_name}.",
-        f"{client_name}, tesknimy! Wpadnij odswiezyc look po {last_treatment}. {campaign_goal}!",
-        f"Hej {client_name}! {campaign_goal} tylko dla naszych klientek. Do zobaczenia w {salon_name}."
+    # Style z Emotkami
+    styles = [
+        "Styl: Przyjaciółka, dużo energii! Użyj emotek ✨💖",
+        "Styl: Relaks i Zen. Emotki roślinne 🌿🌸",
+        "Styl: Konkretnie, krótko i z uśmiechem 😎",
+        "Styl: Ekskluzywnie i elegancko 💎"
     ]
+    current_style = random.choice(styles)
+
+    prompt = f"""
+    Jesteś: {salon_name}. SMS do: {client_name}.
+    Cel: {campaign_goal}. Zabieg: {last_treatment}.
+    WYMÓG STYLU: {current_style}
     
-    fake_msg = random.choice(szablony)
-    return usun_ogonki(fake_msg), "SYMULACJA (Brak połączenia z AI)", "⚠️ Działam w trybie OFFLINE (AI niedostępne)"
+    ZASADY:
+    1. Użyj wołacza (np. Aniu).
+    2. Max 160 znaków.
+    3. Bez polskich znaków, ale ZOSTAW EMOTKI.
+    """
+    
+    safety = [{"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"}]
+
+    try:
+        # Próba generowania
+        res = model.generate_content(prompt, safety_settings=safety)
+        if res.text:
+            return process_message(res.text.strip()), prompt, None
+        else:
+            return None, prompt, "Model zwrócił pustą odpowiedź"
+
+    except Exception as e:
+        return None, prompt, f"Błąd w trakcie generowania: {e}"
