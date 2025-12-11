@@ -39,18 +39,26 @@ def logout_user():
     supabase.auth.sign_out()
 
 # --- OPERACJE NA DANYCH (CRUD) ---
-def add_client(salon_id, imie, telefon, zabieg, data):
+def add_client(salon_id, imie, telefon, zabieg, data=None):
     try:
-        supabase.table("klientki").insert({
+        # Tworzymy słownik danych
+        payload = {
             "salon_id": salon_id, 
             "imie": imie, 
             "telefon": telefon,
-            "ostatni_zabieg": zabieg, 
-            "data_wizyty": str(data)
-        }).execute()
+            "ostatni_zabieg": zabieg
+        }
+        
+        # Dodajemy datę tylko, jeśli faktycznie istnieje (nie jest pusta ani None)
+        if data and str(data).strip() != "":
+            payload["data_wizyty"] = str(data)
+        else:
+            payload["data_wizyty"] = None  # To wyśle NULL do bazy SQL
+
+        supabase.table("klientki").insert(payload).execute()
         return True
     except Exception as e:
-        st.error(f"Błąd bazy: {e}")
+        st.error(f"❌ Błąd zapisu do bazy: {e}") # To pozwoli zobaczyć konkretny błąd
         return False
 
 def get_clients(salon_id):
