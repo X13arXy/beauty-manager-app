@@ -38,78 +38,53 @@ def process_message(raw_text):
     return clean_text
 
 def generate_single_message(salon_name, campaign_goal, client_name, last_treatment):
-    """Generuje wiadomość z DUŻĄ energią i różnorodnością"""
-    
-    # --- LOSOWANIE OSOBOWOŚCI (To jest klucz do różnorodności) ---
+    # 1. Losowanie stylu (to masz super, zostawiamy)
     vibe_list = [
-        "ZWARIOWANA PRZYJACIÓŁKA: Dużo energii, wykrzykniki, emocje! Pisz tak, jakbyś nie widziała jej sto lat.",
-        "TROSKLIWA OPIEKUNKA: Skup się na relaksie, odpoczynku, 'chwili dla siebie'. Ciepło i spokój.",
-        "EKSPERTKA BEAUTY: Skup się na efekcie 'wow', blasku, byciu gwiazdą. Komplementuj.",
-        "KRÓTKO I NA TEMAT (ALE MIŁO): Konkret, ale z uśmiechem. Bez zbędnego lania wody.",
-        "TAJEMNICZA: Zacznij od pytania, zrób aurę ekskluzywności."
+        "STYL: Przyjaciółka, dużo energii, emoji ✨. Bez oficjalnego tonu!",
+        "STYL: Troskliwa, ciepła, nacisk na relaks 🌿. Spokojny ton.",
+        "STYL: Konkretna, krótka, z humorem 😎. Krótka piłka.",
+        "STYL: Ekskluzywna, elegancka, spraw by poczuła się wyjątkowo 💎."
     ]
-    # Losujemy jeden styl dla tej konkretnej klientki
     current_vibe = random.choice(vibe_list)
 
-    # --- PROMPT "BESTIE" ---
+    # 2. Ulepszony Prompt z przykładami odmiany
     prompt = f"""
-    Jesteś właścicielką salonu "{salon_name}". Piszesz prywatnego SMS-a do klientki: {client_name}.
-    Ostatnio robiła: {last_treatment}.
+    Jesteś managerką salonu "{salon_name}". Napisz SMS do klienta: "{client_name}".
     
-    CEL: {campaign_goal}.
+    ZADANIE:
+    Napisz wiadomość zachęcającą do: {campaign_goal}.
+    Ostatni zabieg klienta: {last_treatment} (nawiąż do niego, jeśli pasuje).
     
-    TWOJA ROLA W TYM SMSIE: {current_vibe} (Trzymaj się tego stylu!).
+    WYMAGANY STYL: {current_vibe}
     
-    BARDZO WAŻNE ZASADY (PRZESTRZEGAJ ICH):
-    1. ZABRONIONE: Nie używaj słów "zapraszamy", "skorzystaj", "oferujemy", "usługi". To brzmi jak bot!
-    2. ZAMIAST TEGO: Pisz "wpadaj", "mam dla Ciebie", "zróbmy coś fajnego", "tęsknimy".
-    3. Zacznij od imienia w WOŁACZU (np. "Hejka Aniu!", "Cześć Kasiu!").
-    4. Dodaj 2-3 emoji pasujące do wylosowanego stylu.
-    5. Jeśli to pasuje, nawiąż luźno do ostatniego zabiegu (np. "jak tam pazurki?", "czas na relaks?").
-    6. Podpisz się tylko nazwą salonu.
-    7. Pisz poprawną polszczyzną (bez 'ogonków' zajmiemy się później).
-    8. Max 160 znaków.
+    ZASADY KRYTYCZNE:
+    1. ZAWSZE odmieniaj imię w wołaczu!
+       - Kuba -> Cześć Kubo!
+       - Anna -> Hej Aniu!
+       - Piotr -> Dzień dobry Piotrze!
+    2. Nie używaj słów: "zapraszamy", "oferta", "rabat", "klient". To brzmi jak spam.
+    3. Długość: absolutne maximum 160 znaków.
+    4. Bez polskich znaków (usuń ogonki na końcu, ale teraz pisz po polsku).
+    
+    Treść wiadomości:
     """
-    
+
     safety = [{"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"}]
 
     try:
-        # Próbujemy 3 razy
-        for attempt in range(3):
-            try:
-                res = model.generate_content(prompt, safety_settings=safety)
-                raw_text = res.text.strip()
-                return process_message(raw_text)
-            except:
-                time.sleep(1) # Krótka przerwa
+        # Generowanie
+        res = model.generate_content(prompt, safety_settings=safety)
+        raw_text = res.text.strip()
         
-        # Fallback
-        return usun_ogonki(f"Czesc {client_name}! {campaign_goal}. Czekamy na Ciebie w {salon_name}!") 
-    except:
-        return usun_ogonki(f"Czesc {client_name}! {campaign_goal}. Czekamy na Ciebie w {salon_name}!")
+        # Jeśli odpowiedź jest pusta, rzuć błąd żeby wejść do except
+        if not raw_text:
+            raise ValueError("Pusta odpowiedź od AI")
+            
+        return process_message(raw_text)
 
-# --- IMPORT (BEZ ZMIAN) ---
-def parse_vcf(file_content):
-    try:
-        content = file_content.decode("utf-8")
-    except UnicodeDecodeError:
-        content = file_content.decode("latin-1")
-    contacts = []
-    current = {}
-    for line in content.splitlines():
-        if line.startswith("BEGIN:VCARD"): current = {}
-        elif line.startswith("FN:") or line.startswith("N:"):
-            if "Imię" not in current:
-                parts = line.split(":", 1)[1]
-                current["Imię"] = parts.replace(";", " ").strip()
-        elif line.startswith("TEL"):
-            if "Telefon" not in current:
-                num = line.split(":", 1)[1]
-                clean = ''.join(filter(str.isdigit, num))
-                if len(clean) == 9: clean = "48" + clean
-                current["Telefon"] = clean
-        elif line.startswith("END:VCARD"):
-            if "Imię" in current and "Telefon" in current:
-                current["Ostatni Zabieg"] = "Nieznany"
-                contacts.append(current)
-    return pd.DataFrame(contacts)
+    except Exception as e:
+        # Tutaj printujemy błąd w logach (widoczne w terminalu, nie na stronie dla klienta)
+        print(f"❌ Błąd generowania dla {client_name}: {e}")
+        # Awaryjna wiadomość, ale spróbujmy chociaż trochę odmienić
+        return usun_ogonki(f"Czesc {client_name}! {campaign_goal}. Wpadnij do {salon_name}!")
+
