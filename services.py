@@ -12,10 +12,10 @@ except ImportError:
 # --- KONFIGURACJA AI ---
 def init_ai():
     try:
-        # Sprawdzamy czy klucz jest w secrets
         if "GOOGLE_API_KEY" in st.secrets:
             genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
-            return genai.GenerativeModel('models/gemini-1.5-flash-latest')
+            # ZMIANA: Używamy wersji stabilnej (większe limity)
+            return genai.GenerativeModel('gemini-1.5-flash')
         else:
             return None
     except Exception as e:
@@ -24,7 +24,7 @@ def init_ai():
 
 model = init_ai()
 
-# --- FUNKCJE POMOCNICZE (Tekst i Pliki) ---
+# --- FUNKCJE POMOCNICZE ---
 def usun_ogonki(tekst):
     mapa = {'ą': 'a', 'ć': 'c', 'ę': 'e', 'ł': 'l', 'ń': 'n', 'ó': 'o', 'ś': 's', 'ź': 'z', 'ż': 'z',
             'Ą': 'A', 'Ć': 'C', 'Ę': 'E', 'Ł': 'L', 'Ń': 'N', 'Ó': 'O', 'Ś': 'S', 'Ź': 'Z', 'Ż': 'Z'}
@@ -65,14 +65,13 @@ def parse_vcf(file_content):
 
 # --- LOGIKA GENEROWANIA I WYSYŁKI ---
 
-# UWAGA: Zmieniono nazwę funkcji, aby pasowała do app.py
 def generate_sms_content(salon_name, client_data, campaign_goal):
     """
     Generuje treść SMS. 
     Obsługuje zarówno 'row' (wiersz z DataFrame) jak i 'string' (samo imię dla podglądu).
     """
     
-    # 1. Rozpoznaj, czy client_data to wiersz (dict/Series) czy samo imię (str)
+    # 1. Rozpoznaj, czy client_data to wiersz czy imię
     if isinstance(client_data, str):
         imie = client_data
         ostatni_zabieg = "nieznany"
@@ -94,13 +93,13 @@ def generate_sms_content(salon_name, client_data, campaign_goal):
     3. Podpisz się: {salon_name}.
     4. Max 150 znaków.
     """
+    
     try:
         res = model.generate_content(prompt)
         text = res.text.strip()
         return usun_ogonki(text)
-        except Exception as e:
-        # To pokaże prawdziwy błąd w podglądzie SMS zamiast "słabej wiadomości"
-        print(f"BŁĄD W LOGACH: {e}") 
+    except Exception as e:
+        # ZMIANA: Zwracamy treść błędu, żebyś wiedział co się dzieje
         return f"BLAD AI: {str(e)}"
 
 def send_sms_via_api(phone, message):
