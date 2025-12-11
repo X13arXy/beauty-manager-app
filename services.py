@@ -98,8 +98,10 @@ def generate_sms_content(salon_name, client_data, campaign_goal):
         res = model.generate_content(prompt)
         text = res.text.strip()
         return usun_ogonki(text)
-    except:
-        return usun_ogonki(f"Czesc {imie}! Zapraszamy do {salon_name}.")
+        except Exception as e:
+        # To pokaże prawdziwy błąd w podglądzie SMS zamiast "słabej wiadomości"
+        print(f"BŁĄD W LOGACH: {e}") 
+        return f"BLAD AI: {str(e)}"
 
 def send_sms_via_api(phone, message):
     """Wysyła SMS przez bramkę SMSAPI"""
