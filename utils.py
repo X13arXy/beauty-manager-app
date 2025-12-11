@@ -23,32 +23,36 @@ def usun_ogonki(tekst):
     return tekst
 
 def generate_single_message(salon_name, campaign_goal, client_name, last_treatment):
-    """Generuje JEDNĄ wiadomość (do podglądu lub wysyłki)"""
     prompt = f"""
     Jesteś recepcjonistką w salonie beauty "{salon_name}".
     Napisz SMS do klientki: {client_name}.
     Ostatni zabieg: {last_treatment}.
     Cel kampanii: {campaign_goal}.
     
-    ZASADY:
-    1. Zacznij od imienia w wołaczu (Cześć Kasiu).
-    2. Styl: Miły, ciepły, krótki.
-    3. Podpisz się: {salon_name}.
-    4. Pisz poprawną polszczyzną (my usuniemy ogonki).
-    5. Max 160 znaków.
-    """
+Zacznij od imienia w WOŁACZU (np. "Cześć Kasiu", a nie "Cześć Kasia").
+Styl: Ciepły, miły, relacyjny (jak dobra koleżanka, ale z szacunkiem).
+Użyj języka korzyści (np. "poczuj się piękna", "zadbaj o siebie", "tęsknimy").
+Dodaj 1-2 emoji (np. 💅, 🌸, ✨).
+Podpisz się: {salon_name}.
+Pisz POPRAWNĄ POLSZCZYZNĄ (używaj ą, ę, ś, ć - nie martw się kodowaniem, my to naprawimy).
+Całość ma mieć max 150 znaków.
+"""
+
+# Konfiguracja bezpieczeństwa (żeby nie blokowało słów "ciało", "skóra")
+safety = [{"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},{"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},{"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},{"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}]
+
     try:
         # Próbujemy 3 razy w razie błędu API
         for _ in range(3):
             try:
-                res = model.generate_content(prompt)
+                res = model.generate_content(prompt, safety_settings=safety)
                 return usun_ogonki(res.text.strip())
             except:
                 time.sleep(1)
-        return f"Czesc {client_name}! Zapraszamy do {salon_name}." # Tekst awaryjny
+        # Fallback (gdyby AI padło 3 razy)
+        return f"Czesc {client_name}! Zapraszamy do {salon_name}. {campaign_goal}." 
     except:
         return f"Czesc {client_name}! Zapraszamy do {salon_name}."
-
 # --- IMPORT Z TELEFONU ---
 def parse_vcf(file_content):
     """Czyta pliki kontaktów .vcf z telefonu"""
@@ -77,4 +81,5 @@ def parse_vcf(file_content):
                 current["Ostatni Zabieg"] = "Nieznany"
                 contacts.append(current)
     
+
     return pd.DataFrame(contacts)
