@@ -8,15 +8,21 @@ def init_ai():
     try:
         if "GOOGLE_API_KEY" in st.secrets:
             genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
+            
+            # ZMIANA NA MODEL STANDARDOWY (STABILNY)
+            # gemini-pro jest darmowy w ramach limitów i bardzo szybki
+            model_name = 'gemini-pro'
+            
             config = genai.types.GenerationConfig(
-                temperature=0.9,
-                top_p=0.95,
-                candidate_count=1
+                temperature=0.8,  # Trochę kreatywności, ale bez szaleństw
+                candidate_count=1,
+                max_output_tokens=100 # <--- OPTYMALIZACJA: Limitujemy długość, żeby AI kończyło szybciej (taniej i szybciej)
             )
-            return genai.GenerativeModel('models/gemini-1.5-flash', generation_config=config)
+            return genai.GenerativeModel(model_name, generation_config=config)
         else:
             return None
     except Exception as e:
+        print(f"Błąd inicjalizacji AI: {e}")
         return None
 
 model = init_ai()
@@ -31,6 +37,7 @@ def usun_ogonki(tekst):
 
 def process_message(raw_text):
     clean_text = usun_ogonki(raw_text)
+    # Zabezpieczenie: ucinamy, jeśli AI się rozpędziło
     if len(clean_text) > 160:
         return clean_text[:157] + "..."
     return clean_text
@@ -61,45 +68,44 @@ def parse_vcf(file_content):
                 contacts.append(current)
     return pd.DataFrame(contacts)
 
-# --- GENEROWANIE WIADOMOŚCI (POPRAWIONE) ---
+# --- GENEROWANIE WIADOMOŚCI ---
 def generate_single_message_debug(salon_name, campaign_goal, client_name, last_treatment):
     """
-    Zwraca krotkę: (wiadomość, prompt_użyty, błąd)
-    Dzięki temu w UI zobaczymy co dokładnie wysłaliśmy do AI.
+    Zwraca: (wiadomość, prompt, błąd)
     """
     if not model:
-        return None, None, "❌ Brak konfiguracji API KEY w secrets!"
+        return None, None, "❌ Brak połączenia z AI. Sprawdź klucz API."
 
+    # Krótkie style, żeby nie marnować tokenów na czytanie
     vibe_list = [
-        "STYL: Przyjaciółka, dużo energii ✨",
-        "STYL: Troskliwa i ciepła 🌿",
-        "STYL: Konkretna i krótka 😎",
-        "STYL: Ekskluzywna i elegancka 💎"
+        "Energiczna koleżanka",
+        "Ciepła i troskliwa",
+        "Krótko i konkretnie",
+        "Ekskluzywnie"
     ]
     current_vibe = random.choice(vibe_list)
 
+    # Prompt zoptymalizowany pod szybkość (krótszy, konkretny)
     prompt = f"""
-    Jesteś managerką salonu "{salon_name}". 
-    Napisz SMS do klientki: "{client_name}".
-    CEL KAMPANII: {campaign_goal}.
-    OSTATNI ZABIEG: {last_treatment}.
+    Jesteś: {salon_name}. Piszesz SMS do: {client_name}.
+    Cel: {campaign_goal}.
+    Ostatni zabieg: {last_treatment}.
+    Styl: {current_vibe}.
     
-    TWOJA ROLA: {current_vibe}
-    
-    ZASADY:
-    1. Zacznij od WOŁACZA imienia (np. "Kasiu", "Marku").
+    Wymogi:
+    1. Wołacz imienia.
     2. Max 160 znaków.
-    3. Bez polskich znaków (usuń ogonki).
-    4. Nie używaj słów "zapraszamy", "oferta".
+    3. Bez polskich znaków.
+    4. Żadnego marketingu typu "zapraszamy".
     """
     
     safety = [{"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"}]
 
     try:
         res = model.generate_content(prompt, safety_settings=safety)
-        if res.text:
+        if res and res.text:
             return process_message(res.text.strip()), prompt, None
         else:
-            return None, prompt, "Pusta odpowiedź od AI"
+            return None, prompt, "Pusta odpowiedź"
     except Exception as e:
         return None, prompt, str(e)
