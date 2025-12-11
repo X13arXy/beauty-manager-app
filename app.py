@@ -91,6 +91,7 @@ def send_campaign_sms(target_df, campaign_goal, generated_text, is_test_mode):
     sms_token = st.secrets.get("SMSAPI_TOKEN", "")
     client = None
 
+    # Konfiguracja klienta SMSAPI (tylko jeśli to nie test)
     if not is_test_mode:
         if not sms_token:
             st.error("❌ Brak tokenu SMSAPI!")
@@ -101,15 +102,39 @@ def send_campaign_sms(target_df, campaign_goal, generated_text, is_test_mode):
             st.error(f"Błąd logowania SMSAPI: {e}")
             return
 
-   time.sleep(1)
+    # Inicjalizacja paska postępu
+    progress_bar = st.progress(0.0)
+    preview_name = st.session_state.get('preview_client')
+    
+    # --- TUTAJ BRAKOWAŁO PĘTLI FOR ---
+    for index, row in target_df.iterrows():
         
-        # Oblicz postęp
+        # Personalizacja treści (zamiana imienia z podglądu na imię klientki)
+        final_text = generated_text
+        if preview_name and preview_name in generated_text:
+            final_text = generated_text.replace(preview_name, row['imie'])
+        
+        clean_text = usun_ogonki(final_text)
+
+        # Logika wysyłania lub testowania
+        if is_test_mode:
+            # Tryb TEST: Wyświetl w konsoli/interfejsie zamiast wysyłać
+            print(f"[TEST SMS] Do: {row['telefon']} | Treść: {clean_text}")
+            # Opcjonalnie można wyświetlić toster, ale przy dużej bazie spowolni
+            # st.toast(f"Test do: {row['imie']}") 
+        else:
+            # Tryb PRODUKCJA: Wyślij SMS
+            try:
+                client.sms.send(to=row['telefon'], message=clean_text)
+            except Exception as e:
+                st.error(f"Błąd wysyłki do {row['imie']}: {e}")
+
+        # Symulacja opóźnienia (ważne przy API, żeby nie zablokowali)
+        time.sleep(1)
+        
+        # Aktualizacja paska postępu
         progress_value = (index + 1) / len(target_df)
-
-        # Zabezpiecz, aby nie przekroczyło 1.0 (Fix z poprzedniej odpowiedzi)
-        progress_value = min(progress_value, 1.0)
-
-        # Aktualizuj pasek
+        progress_value = min(progress_value, 1.0) # Zabezpieczenie
         progress_bar.progress(progress_value)
     
     # --- KONIEC PĘTLI FOR ---
@@ -120,8 +145,9 @@ def send_campaign_sms(target_df, campaign_goal, generated_text, is_test_mode):
 # --- 4. EKRAN LOGOWANIA ---
 # Upewnij się, że ten blok jest w odpowiednim miejscu pliku (prawdopodobnie na samym dole, poza funkcją wysyłania)
 
-if not st.session_state.get('user'):  # Użycie .get() jest bezpieczniejsze
-    col1, col2, col3 = st.columns([1, 2, 1]) # <--- TUTAJ BRAKOWAŁO WCIĘCIA
+# --- 4. EKRAN LOGOWANIA ---
+if not st.session_state.get('user'):
+    col1, col2, col3 = st.columns([1, 2, 1])
     
     with col2:
         st.title("💅 Beauty SaaS")
@@ -139,7 +165,7 @@ if not st.session_state.get('user'):  # Użycie .get() jest bezpieczniejsze
             if st.button("Załóż konto"):
                 register_user(r_email, r_pass)
 
-    st.stop() # To zatrzymuje resztę aplikacji, jeśli użytkownik nie jest zalogowany
+    st.stop() # Zatrzymaj resztę aplikacji
 
 # --- 5. APLIKACJA WŁAŚCIWA ---
 CURRENT_USER = st.session_state['user']
@@ -371,6 +397,7 @@ elif page == "🤖 Automat SMS":
                 if st.button("🚀 2. Wyślij", type="primary" if not is_test else "secondary"):
                     send_campaign_sms(target_df, campaign_goal, st.session_state['sms_preview'], is_test)
                     st.session_state['sms_preview'] = None
+
 
 
 
