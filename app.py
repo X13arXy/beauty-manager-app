@@ -34,7 +34,7 @@ except Exception as e:
 # AI
 try:
     genai.configure(api_key=GOOGLE_API_KEY)
-    model = genai.GenerativeModel('models/gemini-1.5-flash-latest')
+    model = genai.GenerativeModel('models/gemini-flash-latest')
 except Exception as e:
     st.error(f"❌ Błąd konfiguracji Gemini: {e}")
     st.stop()
@@ -378,5 +378,6 @@ elif page == "🤖 Automat SMS":
             if st.button(f"🚀 WYŚLIJ DO WSZYSTKICH ({len(target_df)} osób)", type="primary"):
                 send_all_campaign(target_df, campaign_goal, salon_name, is_test)
                 st.session_state['preview_msg'] = None # Reset
+
 
 
