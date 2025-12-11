@@ -148,51 +148,24 @@ elif page == "🤖 Automat SMS":
             mode = st.radio("Tryb:", ["🧪 Test (Symulacja)", "💸 Produkcja (Płatny SMSAPI)"])
             is_test = (mode == "🧪 Test (Symulacja)")
             
-            if st.button(f"🚀 WYŚLIJ DO {len(target)} OSÓB", type="primary"):
-                
-                # Inicjalizacja SMSAPI (tylko w app.py, bo tu jest potrzebna)
-                client = None
-                if not is_test:
-                    token = st.secrets.get("SMSAPI_TOKEN", "")
-                    if not token:
-                        st.error("Brak tokenu SMSAPI!")
-                        st.stop()
-                    try:
-                        client = SmsApiPlClient(access_token=token)
-                    except:
-                        st.error("Błąd SMSAPI")
-                        st.stop()
-                
-                st.subheader("📨 Raport wysyłki na żywo:")
-                bar = st.progress(0.0)
-                
-                # Kontener na logi - tu będą wpadać wiadomości
-                log_box = st.container()
-                
-                for i, (idx, row) in enumerate(target.iterrows()):
-                    
-                    # 1. GENEROWANIE (Tu wołamy MÓZG z utils.py)
-                    # Dzięki temu każda wiadomość jest inna!
-                    with st.spinner(f"AI pisze do: {row['imie']}..."):
-                        msg = utils.generate_single_message(salon, cel, row['imie'], row['ostatni_zabieg'])
-                    
-                    # 2. WYSYŁKA I WYŚWIETLENIE
-                    with log_box:
-                        if is_test:
-                            st.success(f"✅ [TEST] Do: **{row['imie']}**")
-                            st.code(msg, language='text')
-                        else:
-                            try:
-                                client.sms.send(to=str(row['telefon']), message=msg)
-                                st.success(f"✅ [WYSŁANO] Do: **{row['imie']}**")
-                                st.code(msg, language='text')
-                            except Exception as e:
-                                st.error(f"❌ Błąd: {e}")
-                    
-                    # Odpoczynek dla AI (żeby nie było error 429)
-                    time.sleep(3) 
-                    bar.progress((i+1)/len(target))
-                
-                st.balloons()
-                st.success("Zakończono!")
-                st.session_state['preview_msg'] = None
+           if st.button("🚀 Generuj wiadomości"):
+    progress_bar = st.progress(0)
+    
+    for index, row in df.iterrows(): # df to twoja tabela z klientami
+        
+        # Wywołanie Twojej funkcji z utils
+        wiadomosc = generate_single_message(
+            salon_name="KOX BEAUTY",
+            campaign_goal="promocja swiateczna -15%",
+            client_name=row['Imię'],
+            last_treatment=row.get('Ostatni Zabieg', 'stylizacja')
+        )
+        
+        st.write(f"**Do:** {row['Imię']} ({row['Telefon']})")
+        st.info(wiadomosc)
+        
+        # WAŻNE: Odczekaj chwilę, żeby nie zablokować API Google
+        time.sleep(1.5) 
+        
+        # Aktualizacja paska postępu
+        progress_bar.progress((index + 1) / len(df))
