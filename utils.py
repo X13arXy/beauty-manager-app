@@ -2,11 +2,13 @@ import streamlit as st
 import google.generativeai as genai
 import pandas as pd
 import time
+import random
 
 # --- KONFIGURACJA AI ---
 def init_ai():
     try:
         genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
+        # Używamy modelu Flash (jest szybki i wystarczająco kreatywny)
         return genai.GenerativeModel('models/gemini-1.5-flash')
     except Exception as e:
         st.error(f"Błąd konfiguracji AI: {e}")
@@ -16,7 +18,7 @@ model = init_ai()
 
 # --- NARZĘDZIA TECHNICZNE ---
 def usun_ogonki(tekst):
-    """Zamienia polskie znaki na łacińskie"""
+    """Zamienia polskie znaki na łacińskie (dla tanich SMS)"""
     mapa = {'ą': 'a', 'ć': 'c', 'ę': 'e', 'ł': 'l', 'ń': 'n', 'ó': 'o', 'ś': 's', 'ź': 'z', 'ż': 'z',
             'Ą': 'A', 'Ć': 'C', 'Ę': 'E', 'Ł': 'L', 'Ń': 'N', 'Ó': 'O', 'Ś': 'S', 'Ź': 'Z', 'Ż': 'Z'}
     for pl, latin in mapa.items():
@@ -31,29 +33,38 @@ def process_message(raw_text):
     return clean_text
 
 def generate_single_message(salon_name, campaign_goal, client_name, last_treatment):
-    """Generuje wiadomość ze ścisłym trzymaniem się celu i odmianą imienia"""
+    """Generuje UNIKALNĄ, ciepłą wiadomość dla konkretnej osoby"""
     
-    # PROMPT SKUPIONY NA CELU I GRAMATYCE
+    # Lista różnych stylów, żeby AI nie pisało w kółko tego samego
+    style = [
+        "Bardzo entuzjastyczny i radosny",
+        "Ciepły, spokojny i troskliwy",
+        "Krótki, konkretny, ale z uśmiechem",
+        "Pytający o samopoczucie i zapraszający"
+    ]
+    wylosowany_styl = random.choice(style)
+
+    # PROMPT PREMIUM (Relacyjny)
     prompt = f"""
-    Jesteś copywriterem w salonie "{salon_name}".
-    Masz napisać SMS do klienta: "{client_name}".
+    Jesteś managerką relacji w salonie "{salon_name}". 
+    Twoim celem jest dbanie o klientki, nie tylko sprzedaż.
     
-    WAŻNE - CEL KAMPANII: "{campaign_goal}".
-    Musisz napisać DOKŁADNIE o tym celu. Nie pisz ogólników.
+    Napisz SMS do klientki: {client_name}.
+    Ostatnio była na: {last_treatment}.
     
-    INSTRUKCJA ODMIANY IMIENIA:
-    1. Spójrz na pole klienta: "{client_name}".
-    2. Jeśli to imię i nazwisko (np. Anna Nowak), weź TYLKO IMIĘ (Anna).
-    3. Odmień to imię w WOŁACZU (np. "Czesc Aniu", "Czesc Krzysku", "Czesc Marku").
-    4. Nigdy nie pisz "Witaj Anna" ani "Witaj Krzysiek". Ma być "Czesc Aniu", "Czesc Krzysku".
+    CEL WIADOMOŚCI: {campaign_goal}.
     
-    ZASADY TECHNICZNE:
-    1. Pisz bez polskich znaków (a, e, s, c, z...).
-    2. Podpisz się: {salon_name}.
-    3. Max 160 znaków.
+    TWOJE INSTRUKCJE (BARDZO WAŻNE):
+    1. Styl: {wylosowany_styl}.
+    2. Pisz jak człowiek do człowieka (koleżanka do koleżanki). Unikaj korporacyjnego języka.
+    3. Zacznij od imienia w wołaczu (np. "Cześć Kasiu!", "Dzień dobry Aniu").
+    4. Jeśli to pasuje do celu, nawiąż delikatnie do ostatniego zabiegu ({last_treatment}), np. "jak tam Twoje rzęsy?".
+    5. Dodaj 1 lub 2 emoji pasujące do treści (np. 💅, 🌸, ✨, ☕).
+    6. Podpisz się nazwą salonu.
+    7. Pisz normalnie po polsku (z ą, ę) - system sam usunie ogonki.
+    8. Całość musi mieć MAX 150 znaków.
     """
     
-    # Wyłączenie filtrów
     safety = [{"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"}]
 
     try:
@@ -61,19 +72,18 @@ def generate_single_message(salon_name, campaign_goal, client_name, last_treatme
         for _ in range(3):
             try:
                 res = model.generate_content(prompt, safety_settings=safety)
-                return process_message(res.text.strip())
+                raw_text = res.text.strip()
+                # Czyścimy technicznie
+                return process_message(raw_text)
             except:
-                time.sleep(2) # Czekamy chwilę dłużej
+                time.sleep(1)
         
-        # AWARYJNIE (Jeśli AI nie odpowie):
-        # Wstawiamy cel kampanii ręcznie, zamiast ogólnego "Zapraszamy"
-        return usun_ogonki(f"Czesc {client_name.split()[0]}! {campaign_goal}. {salon_name}")
-        
+        # Fallback (Gdyby AI padło)
+        return usun_ogonki(f"Czesc {client_name}! {campaign_goal}. Pozdrawiamy, {salon_name}") 
     except:
-        # Ostateczna deska ratunku
-        return usun_ogonki(f"Czesc! {campaign_goal}. {salon_name}")
+        return usun_ogonki(f"Czesc {client_name}! {campaign_goal}. Pozdrawiamy, {salon_name}")
 
-# --- IMPORT Z TELEFONU ---
+# --- IMPORT Z TELEFONU (BEZ ZMIAN) ---
 def parse_vcf(file_content):
     try:
         content = file_content.decode("utf-8")
@@ -98,3 +108,4 @@ def parse_vcf(file_content):
                 current["Ostatni Zabieg"] = "Nieznany"
                 contacts.append(current)
     return pd.DataFrame(contacts)
+
