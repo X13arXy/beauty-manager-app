@@ -167,10 +167,11 @@ elif page == "🤖 Automat SMS":
                                     st.error(f"Błąd wysyłki: {e}")
                     
                     # Czekamy, żeby AI mogło pomyśleć przy następnym i żeby Google nie zablokowało
-                    time.sleep(2) 
+                    time.sleep(3) 
                     bar.progress((i+1)/len(target))
                 
                 st.balloons()
                 st.success("Zakończono!")
+
 
 
