@@ -1,9 +1,9 @@
 import streamlit as st
 import pandas as pd
-import google.generativeai as genai
 import time
 from supabase import create_client, Client
 
+# Import naszych modułów
 import database as db
 import utils
 
@@ -14,34 +14,19 @@ st.markdown("""
 <style>
     .stButton>button { width: 100%; border-radius: 5px; }
     .element-container { margin-bottom: 0.5rem; }
+    /* Ładniejszy wygląd logów */
+    .stCode { font-family: 'Courier New', monospace; font-size: 14px; }
 </style>
 """, unsafe_allow_html=True)
 
-# Ładowanie kluczy
-try:
-    SUPABASE_URL = st.secrets["SUPABASE_URL"]
-    SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
-    GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]
-    SMSAPI_TOKEN = st.secrets.get("SMSAPI_TOKEN", "")
-except KeyError as e:
-    st.error(f"❌ Brak klucza {e} w Secrets!")
-    st.stop()
-
-# Inicjalizacja
-try:
-    supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-except Exception as e:
-    st.error(f"Błąd Supabase: {e}")
-    st.stop()
-
+# Import SMSAPI
 try:
     from smsapi.client import SmsApiPlClient
 except ImportError:
     pass
 
-# Stan sesji
+# --- STAN SESJI ---
 if 'user' not in st.session_state: st.session_state['user'] = None
-if 'preview_msg' not in st.session_state: st.session_state['preview_msg'] = None
 if 'salon_name' not in st.session_state: st.session_state['salon_name'] = ""
 
 # --- LOGOWANIE ---
@@ -73,11 +58,11 @@ with st.sidebar:
 st.title("Panel Salonu")
 page = st.sidebar.radio("Menu", ["📂 Baza Klientek", "🤖 Automat SMS"])
 
-# 📂 BAZA KLIENTEK
+# 📂 BAZA KLIENTEK (IMPORT)
 if page == "📂 Baza Klientek":
     st.header("Baza Klientek")
     with st.expander("📥 Import z telefonu"):
-        f = st.file_uploader("Plik", type=['xlsx','csv','vcf'])
+        f = st.file_uploader("Plik (VCF/Excel)", type=['xlsx','csv','vcf'])
         if f:
             try:
                 df = None
@@ -115,45 +100,33 @@ if page == "📂 Baza Klientek":
         if st.button("Usuń"): db.delete_client(dd, SALON_ID); st.rerun()
     else: st.info("Pusto.")
 
-# 🤖 AUTOMAT SMS
+# 🤖 AUTOMAT SMS (RELACYJNY)
 elif page == "🤖 Automat SMS":
-    st.header("Kampania SMS")
+    st.header("Generator SMS AI (Personalizowany)")
     data = db.get_clients(SALON_ID)
     
     if not data:
         st.warning("Brak klientek.")
     else:
         df = pd.DataFrame(data)
-        st.write("### Konfiguracja")
-        salon = st.text_input("Nazwa Salonu:", value=st.session_state.get('salon_name', ''))
+        
+        c1, c2 = st.columns(2)
+        salon = c1.text_input("Nazwa Salonu:", value=st.session_state.get('salon_name', ''))
         st.session_state['salon_name'] = salon
-        cel = st.text_input("Cel (np. Promocja Noworoczna -20%):")
+        cel = c2.text_input("Co chcesz przekazać? (np. Zaproszenie na kawę):")
         
         wyb = st.multiselect("Do kogo?", df['imie'].tolist(), default=df['imie'].tolist())
         target = df[df['imie'].isin(wyb)]
         
-        # --- PRÓBKA (JEDEN SMS) ---
-        if st.button("👁️ Sprawdź Próbkę"):
-            if not salon or not cel or target.empty:
-                st.error("Uzupełnij dane!")
-            else:
-                sample = target.iloc[0]
-                with st.spinner("AI myśli..."):
-                    # Generujemy próbkę
-                    msg = utils.generate_single_message(salon, cel, sample['imie'], sample['ostatni_zabieg'])
-                    st.session_state['preview_msg'] = msg
-        
-        # --- WIDOK I WYSYŁKA ---
-        if st.session_state['preview_msg']:
-            st.info("👇 Przykładowy SMS (Styl i Treść):")
-            st.code(st.session_state['preview_msg'], language='text')
+        if salon and cel and not target.empty:
+            st.info(f"Wybrano {len(target)} osób. AI wygeneruje UNIKALNĄ treść dla każdej z nich.")
             
-            st.write("---")
             mode = st.radio("Tryb:", ["🧪 Test (Symulacja)", "💸 Produkcja (Płatny SMSAPI)"])
             is_test = (mode == "🧪 Test (Symulacja)")
             
-            if st.button(f"🚀 WYŚLIJ DO {len(target)} OSÓB", type="primary"):
-                # Inicjalizacja klienta
+            if st.button("🚀 GENERUJ I WYŚLIJ (LIVE)", type="primary"):
+                
+                # SMSAPI
                 client = None
                 if not is_test:
                     token = st.secrets.get("SMSAPI_TOKEN", "")
@@ -166,46 +139,37 @@ elif page == "🤖 Automat SMS":
                         st.error("Błąd SMSAPI")
                         st.stop()
                 
-                st.subheader("📨 Raport na żywo:")
-                bar = st.progress(0.0)
-                log_container = st.container()
-                report_data = []
+                st.write("---")
+                st.subheader("📨 Podgląd wysyłki na żywo:")
                 
-                total = len(target)
+                bar = st.progress(0.0)
+                log_box = st.container() # Tu będą wpadać wiadomości
+                
                 for i, (idx, row) in enumerate(target.iterrows()):
                     
-                    # Generowanie (MÓZG)
-                    msg = utils.generate_single_message(salon, cel, row['imie'], row['ostatni_zabieg'])
+                    # 1. GENEROWANIE (Tu dzieje się magia różnorodności)
+                    with st.spinner(f"AI pisze do: {row['imie']}..."):
+                        msg = utils.generate_single_message(salon, cel, row['imie'], row['ostatni_zabieg'])
                     
-                    # Wysyłka
-                    status = "OK"
-                    with log_container:
-                        if is_test:
-                            st.success(f"✅ [TEST] {row['imie']}")
-                            st.caption(msg)
-                        else:
-                            try:
-                                client.sms.send(to=str(row['telefon']), message=msg)
-                                st.success(f"✅ [WYSŁANO] {row['imie']}")
-                                st.caption(msg)
-                            except Exception as e:
-                                st.error(f"❌ Błąd: {e}")
-                                status = "BŁĄD"
+                    # 2. WYSYŁKA I WYŚWIETLENIE
+                    with log_box:
+                        with st.chat_message("assistant"):
+                            st.write(f"**Do: {row['imie']}** ({row['telefon']})")
+                            st.code(msg, language='text')
+                            
+                            if is_test:
+                                st.caption("✅ Symulacja OK")
+                            else:
+                                try:
+                                    client.sms.send(to=str(row['telefon']), message=msg)
+                                    st.caption("✅ Wysłano SMS")
+                                except Exception as e:
+                                    st.error(f"Błąd wysyłki: {e}")
                     
-                    # Dodajemy do tabeli końcowej
-                    report_data.append({"Imię": row['imie'], "Treść": msg, "Status": status})
-                    
-                    # WAŻNE: Opóźnienie 2.5s żeby AI zdążyło pomyśleć nad odmianą imienia
-                    time.sleep(2.5) 
-                    bar.progress((i+1)/total)
+                    # Czekamy, żeby AI mogło pomyśleć przy następnym i żeby Google nie zablokowało
+                    time.sleep(2) 
+                    bar.progress((i+1)/len(target))
                 
                 st.balloons()
                 st.success("Zakończono!")
-                
-                # Tabela Raportu Końcowego
-                if report_data:
-                    st.write("---")
-                    st.write("### 📜 Pełny Raport:")
-                    st.dataframe(pd.DataFrame(report_data), use_container_width=True)
-                
-                st.session_state['preview_msg'] = None
+
