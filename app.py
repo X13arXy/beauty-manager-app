@@ -124,22 +124,22 @@ def send_campaign_sms(target_df, campaign_goal, generated_text, is_test_mode):
             
         time.sleep(1)
        # Oblicz postęp
-progress_value = (index + 1) / len(target_df)
+        progress_value = (index + 1) / len(target_df)
 
-# Zabezpiecz, aby nie przekroczyło 1.0
-progress_value = min(progress_value, 1.0)
+        # Zabezpiecz, aby nie przekroczyło 1.0
+        progress_value = min(progress_value, 1.0)
 
-# Aktualizuj pasek
-progress_bar.progress(progress_value)
+        # Aktualizuj pasek
+        progress_bar.progress(progress_value)
     
-    st.balloons()
-    st.success("🎉 Kampania zakończona!")
+        st.balloons()
+        st.success("🎉 Kampania zakończona!")
 
-# --- 4. EKRAN LOGOWANIA ---
+        # --- 4. EKRAN LOGOWANIA ---
 
-if not st.session_state['user']:
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
+        if not st.session_state['user']:
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
         st.title("💅 Beauty SaaS")
         tab1, tab2 = st.tabs(["Logowanie", "Rejestracja"])
         with tab1:
@@ -382,4 +382,5 @@ elif page == "🤖 Automat SMS":
                 if st.button("🚀 2. Wyślij", type="primary" if not is_test else "secondary"):
                     send_campaign_sms(target_df, campaign_goal, st.session_state['sms_preview'], is_test)
                     st.session_state['sms_preview'] = None
+
 
