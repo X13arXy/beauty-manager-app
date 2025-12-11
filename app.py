@@ -182,28 +182,41 @@ elif page == "🤖 Kampania SMS":
                         st.error("Błąd logowania SMSAPI")
                         st.stop()
                 
+               st.write("---")
+                st.subheader("📨 Raport Wysyłki na Żywo:")
+                
+                # Pasek postępu
                 bar = st.progress(0.0)
-                ok = 0
+                
+                # Kontener na logi (żeby pojawiały się jeden pod drugim)
+                log_container = st.container()
+                
+                ok_count = 0
                 
                 # Pętla wysyłki
                 for i, (idx, row) in enumerate(target_df.iterrows()):
-                    # Generujemy w locie dla każdego
+                    
+                    # Generujemy treść
                     msg = utils.generate_single_message(salon, cel, row['imie'], row['ostatni_zabieg'])
                     
-                    if is_test:
-                        # W trybie testowym pokazujemy tylko pierwsze 3 w powiadomieniach
-                        if i < 3: st.toast(f"Wysłano do {row['imie']}")
-                        ok += 1
-                    else:
-                        try:
-                            client.sms.send(to=str(row['telefon']), message=msg)
-                            ok += 1
-                        except:
-                            st.error(f"Błąd wysyłki do {row['imie']}")
+                    # Wyświetlamy wynik na ekranie
+                    with log_container:
+                        if is_test_mode:
+                            st.success(f"✅ [TEST] Wysłano do: **{row['imie']}** ({row['telefon']})")
+                            st.code(msg, language='text')
+                            ok_count += 1
+                        else:
+                            try:
+                                client.sms.send(to=str(row['telefon']), message=msg)
+                                st.success(f"✅ [PŁATNE] Wysłano do: **{row['imie']}**")
+                                st.caption(f"Treść: {msg}")
+                                ok_count += 1
+                            except Exception as e:
+                                st.error(f"❌ Błąd wysyłki do {row['imie']}: {e}")
                     
                     time.sleep(1.5) # Odpoczynek dla AI
                     bar.progress((i+1)/len(target_df))
                 
                 st.balloons()
-                st.success(f"Wysłano {ok} wiadomości!")
+                st.success(f"🎉 Zakończono! Wysłano pomyślnie: {ok_count} wiadomości.")
                 st.session_state['preview_msg'] = None
