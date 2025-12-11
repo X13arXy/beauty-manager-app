@@ -101,56 +101,45 @@ def send_campaign_sms(target_df, campaign_goal, generated_text, is_test_mode):
             st.error(f"Błąd logowania SMSAPI: {e}")
             return
 
-    st.write("---")
-    progress_bar = st.progress(0)
-    preview_name = st.session_state.get('preview_client')
-
-    for index, row in target_df.iterrows():
-        final_text = generated_text
-        if preview_name and preview_name in generated_text:
-             final_text = generated_text.replace(preview_name, row['imie'])
+   time.sleep(1)
         
-        clean_text = usun_ogonki(final_text)
-
-        if is_test_mode:
-            st.code(f"DO: {row['imie']} ({row['telefon']})\nTREŚĆ: {clean_text}", language='text')
-            st.success(f"🧪 [TEST] Symulacja dla: {row['imie']}")
-        else:
-            try:
-                client.sms.send(to=row['telefon'], message=clean_text)
-                st.success(f"✅ Wysłano do: {row['imie']}")
-            except Exception as e:
-                st.error(f"Błąd bramki SMS dla {row['imie']}: {e}")
-            
-        time.sleep(1)
-       # Oblicz postęp
+        # Oblicz postęp
         progress_value = (index + 1) / len(target_df)
 
-        # Zabezpiecz, aby nie przekroczyło 1.0
+        # Zabezpiecz, aby nie przekroczyło 1.0 (Fix z poprzedniej odpowiedzi)
         progress_value = min(progress_value, 1.0)
 
         # Aktualizuj pasek
         progress_bar.progress(progress_value)
     
-        st.balloons()
-        st.success("🎉 Kampania zakończona!")
+    # --- KONIEC PĘTLI FOR ---
+    # (Te linie muszą być cofnięte do lewej, aby wykonały się RAZ po wysłaniu wszystkich SMSów)
+    st.balloons()
+    st.success("🎉 Kampania zakończona!")
 
-        # --- 4. EKRAN LOGOWANIA ---
+# --- 4. EKRAN LOGOWANIA ---
+# Upewnij się, że ten blok jest w odpowiednim miejscu pliku (prawdopodobnie na samym dole, poza funkcją wysyłania)
 
-        if not st.session_state['user']:
-        col1, col2, col3 = st.columns([1, 2, 1])
-        with col2:
+if not st.session_state.get('user'):  # Użycie .get() jest bezpieczniejsze
+    col1, col2, col3 = st.columns([1, 2, 1]) # <--- TUTAJ BRAKOWAŁO WCIĘCIA
+    
+    with col2:
         st.title("💅 Beauty SaaS")
         tab1, tab2 = st.tabs(["Logowanie", "Rejestracja"])
+        
         with tab1:
             l_email = st.text_input("Email", key="l1")
             l_pass = st.text_input("Hasło", type="password", key="l2")
-            if st.button("Zaloguj się", type="primary"): login_user(l_email, l_pass)
+            if st.button("Zaloguj się", type="primary"):
+                login_user(l_email, l_pass)
+        
         with tab2:
             r_email = st.text_input("Email", key="r1")
             r_pass = st.text_input("Hasło", type="password", key="r2")
-            if st.button("Załóż konto"): register_user(r_email, r_pass)
-    st.stop()
+            if st.button("Załóż konto"):
+                register_user(r_email, r_pass)
+
+    st.stop() # To zatrzymuje resztę aplikacji, jeśli użytkownik nie jest zalogowany
 
 # --- 5. APLIKACJA WŁAŚCIWA ---
 CURRENT_USER = st.session_state['user']
@@ -382,5 +371,6 @@ elif page == "🤖 Automat SMS":
                 if st.button("🚀 2. Wyślij", type="primary" if not is_test else "secondary"):
                     send_campaign_sms(target_df, campaign_goal, st.session_state['sms_preview'], is_test)
                     st.session_state['sms_preview'] = None
+
 
 
