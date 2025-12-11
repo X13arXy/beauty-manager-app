@@ -1,171 +1,194 @@
 import streamlit as st
-import pandas as pd
+from supabase import create_client
 import time
-
-# IMPORTUJEMY NASZE MODUŁY (To jest kluczowe)
-import database as db
-import utils
-
-# --- KONFIGURACJA ---
-st.set_page_config(page_title="Beauty SaaS", page_icon="💅", layout="wide")
-
-st.markdown("""
-<style>
-    .stButton>button { width: 100%; border-radius: 5px; }
-    .element-container { margin-bottom: 0.5rem; }
-</style>
-""", unsafe_allow_html=True)
-
-# Import SMSAPI (opcjonalny, tylko do obsługi wyjątków tutaj)
+from datetime import date
+import pandas as pd
+# Importujemy funkcję AI z twojego drugiego pliku (zakładam, że nazywa się utils.py)
+# Jeśli plik nazywa się inaczej, zmień 'utils' na nazwę swojego pliku
 try:
-    from smsapi.client import SmsApiPlClient
+    from utils import generate_single_message
 except ImportError:
-    pass
+    st.error("Brak pliku utils.py! Upewnij się, że jest w tym samym folderze.")
 
-# --- STAN SESJI ---
-if 'user' not in st.session_state: st.session_state['user'] = None
-if 'preview_msg' not in st.session_state: st.session_state['preview_msg'] = None
-if 'salon_name' not in st.session_state: st.session_state['salon_name'] = ""
+# --- 1. KONFIGURACJA STRONY I BAZY ---
+st.set_page_config(page_title="Manager Klientek", page_icon="💅")
 
-# --- EKRAN LOGOWANIA ---
-if not st.session_state['user']:
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        st.title("💅 Beauty SaaS")
-        t1, t2 = st.tabs(["Logowanie", "Rejestracja"])
-        with t1:
-            e = st.text_input("Email", key="l1")
-            p = st.text_input("Hasło", type="password", key="l2")
-            if st.button("Zaloguj", type="primary"): db.login_user(e, p)
-        with t2:
-            e = st.text_input("Email", key="r1")
-            p = st.text_input("Hasło", type="password", key="r2")
-            if st.button("Załóż konto"): db.register_user(e, p)
-    st.stop()
+def init_supabase():
+    try:
+        url = st.secrets["SUPABASE_URL"]
+        key = st.secrets["SUPABASE_KEY"]
+        return create_client(url, key)
+    except Exception as e:
+        st.error(f"❌ Błąd połączenia z bazą: {e}")
+        st.stop()
 
-# --- APLIKACJA WŁAŚCIWA ---
-USER = st.session_state['user']
-SALON_ID = USER.id
-USER_EMAIL = USER.email
+supabase = init_supabase()
 
-with st.sidebar:
-    st.write(f"Zalogowano: {USER_EMAIL}")
-    if st.button("Wyloguj"): db.logout_user()
-    st.divider()
+if 'user' not in st.session_state:
+    st.session_state['user'] = None
 
-st.title("Panel Salonu")
-page = st.sidebar.radio("Menu", ["📂 Baza Klientek", "🤖 Automat SMS"])
+# --- 2. FUNKCJE LOGIKI BIZNESOWEJ ---
+def login_user(email, password):
+    try:
+        res = supabase.auth.sign_in_with_password({"email": email, "password": password})
+        st.session_state['user'] = res.user
+        st.success("✅ Zalogowano!")
+        time.sleep(1)
+        st.rerun()
+    except Exception as e:
+        st.error(f"Błąd logowania: {e}")
 
-# ========================================================
-# 📂 ZAKŁADKA 1: BAZA KLIENTEK (KORZYSTA Z UTILS I DB)
-# ========================================================
-if page == "📂 Baza Klientek":
-    st.header("Baza Klientek")
-    
-    # IMPORT Z TELEFONU
-    with st.expander("📥 Import z telefonu"):
-        f = st.file_uploader("Plik (VCF/Excel)", type=['xlsx','csv','vcf'])
-        if f:
-            try:
-                df = None
-                # Tu korzystamy z utils.py do czytania plików
-                if f.name.endswith('.vcf'): df = utils.parse_vcf(f.getvalue())
-                elif f.name.endswith('.csv'): df = pd.read_csv(f)
-                else: df = pd.read_excel(f)
+def register_user(email, password):
+    try:
+        res = supabase.auth.sign_up({"email": email, "password": password})
+        if res.user:
+            st.session_state['user'] = res.user
+            st.success("✅ Konto utworzone! Zalogowano.")
+            time.sleep(1)
+            st.rerun()
+    except Exception as e:
+        st.error(f"Błąd rejestracji: {e}")
+
+def logout_user():
+    supabase.auth.sign_out()
+    st.session_state['user'] = None
+    st.rerun()
+
+def add_client(user_id, imie, telefon, zabieg, data_wizyty):
+    clean_tel = ''.join(filter(str.isdigit, str(telefon)))
+    data_val = str(data_wizyty) if data_wizyty else None
+    try:
+        supabase.table("klientki").insert({
+            "salon_id": user_id,
+            "imie": str(imie),
+            "telefon": clean_tel,
+            "ostatni_zabieg": str(zabieg),
+            "data_wizyty": data_val
+        }).execute()
+        return True, "Dodano klientkę!"
+    except Exception as e:
+        return False, str(e)
+
+def get_clients(user_id):
+    try:
+        res = supabase.table("klientki").select("*").eq("salon_id", user_id).order('created_at', desc=True).execute()
+        return res.data
+    except Exception as e:
+        st.error(f"Błąd pobierania danych: {e}")
+        return []
+
+def delete_client(client_id):
+    try:
+        supabase.table("klientki").delete().eq("id", client_id).execute()
+        return True
+    except Exception as e:
+        return False
+
+# --- 3. INTERFEJS UŻYTKOWNIKA (UI) ---
+def main():
+    st.title("🌸 Salon Manager & AI")
+
+    # A. Widok dla niezalogowanych
+    if not st.session_state['user']:
+        tab1, tab2 = st.tabs(["Logowanie", "Rejestracja"])
+        with tab1:
+            st.subheader("Zaloguj się")
+            email = st.text_input("Email", key="login_email")
+            password = st.text_input("Hasło", type="password", key="login_pass")
+            if st.button("Zaloguj"):
+                login_user(email, password)
+        with tab2:
+            st.subheader("Załóż konto")
+            new_email = st.text_input("Email", key="reg_email")
+            new_pass = st.text_input("Hasło", type="password", key="reg_pass")
+            if st.button("Zarejestruj"):
+                register_user(new_email, new_pass)
+
+    # B. Widok dla zalogowanych (Dashboard)
+    else:
+        user_id = st.session_state['user'].id
+        
+        with st.sidebar:
+            st.write(f"Zalogowany: {st.session_state['user'].email}")
+            if st.button("Wyloguj"):
+                logout_user()
+
+        # GŁÓWNE ZAKŁADKI
+        tab_add, tab_list, tab_campaign = st.tabs(["➕ Dodaj", "📋 Lista", "🚀 Kampania SMS (AI)"])
+
+        # --- ZAKŁADKA 1: DODAWANIE ---
+        with tab_add:
+            with st.form("add_client_form"):
+                c1, c2 = st.columns(2)
+                with c1:
+                    imie = st.text_input("Imię i Nazwisko")
+                    telefon = st.text_input("Telefon")
+                with c2:
+                    zabieg = st.text_input("Zabieg")
+                    data_wizyty = st.date_input("Data", value=date.today())
                 
-                if df is not None and not df.empty:
-                    df.columns = [c.lower() for c in df.columns]
-                    ci = next((c for c in df.columns if 'imi' in c or 'name' in c), None)
-                    ct = next((c for c in df.columns if 'tel' in c or 'num' in c), None)
-                    if ci and ct:
-                        sh = pd.DataFrame({"Dodaj": True, "Imię": df[ci], "Telefon": df[ct], "Ostatni Zabieg": "Nieznany"})
-                        ed = st.data_editor(sh, hide_index=True, use_container_width=True, column_config={"Dodaj": st.column_config.CheckboxColumn("Import?", default=True)})
-                        
-                        to_add = ed[ed["Dodaj"]==True]
-                        cnt = len(to_add)
-                        
-                        if st.button(f"✅ ZAPISZ {cnt}"):
-                            bar = st.progress(0.0)
-                            ok = 0
-                            for i, (idx, r) in enumerate(to_add.iterrows()):
-                                # Tu korzystamy z database.py do zapisu
-                                s, m = db.add_client(SALON_ID, r["Imię"], r["Telefon"], r["Ostatni Zabieg"], None)
-                                if s: ok += 1
-                                bar.progress(min((i+1)/cnt, 1.0))
-                            st.success(f"Zapisano {ok}!")
+                if st.form_submit_button("Zapisz"):
+                    if imie:
+                        ok, msg = add_client(user_id, imie, telefon, zabieg, data_wizyty)
+                        if ok:
+                            st.success(msg)
                             time.sleep(1)
                             st.rerun()
-            except: st.error("Błąd pliku")
+                        else:
+                            st.error(msg)
+                    else:
+                        st.warning("Imię jest wymagane!")
 
-    # TABELA
-    data = db.get_clients(SALON_ID)
-    if data:
-        df = pd.DataFrame(data)
-        st.dataframe(df[['imie','telefon','ostatni_zabieg']], use_container_width=True)
-        d = df.set_index('id')['imie'].to_dict()
-        dd = st.selectbox("Usuń:", options=d.keys(), format_func=lambda x: d[x])
-        if st.button("Usuń"): db.delete_client(dd, SALON_ID); st.rerun()
-    else: st.info("Pusto.")
-
-# ========================================================
-# 🤖 ZAKŁADKA 2: AUTOMAT SMS (LIVE RAPORT + UNIKALNE TREŚCI)
-# ========================================================
-elif page == "🤖 Automat SMS":
-    st.header("Generator SMS AI (Personalizowany)")
-    data = db.get_clients(SALON_ID)
-    
-    if not data:
-        st.warning("Brak klientek.")
-    else:
-        df = pd.DataFrame(data)
-        
-        c1, c2 = st.columns(2)
-        salon = c1.text_input("Nazwa Salonu:", value=st.session_state.get('salon_name', 'Glow Studio'))
-        st.session_state['salon_name'] = salon
-        cel = c2.text_input("Co chcesz przekazać? (np. Zaproszenie na kawę):")
-        
-        wyb = st.multiselect("Do kogo?", df['imie'].tolist(), default=df['imie'].tolist())
-        target = df[df['imie'].isin(wyb)]
-        
-        # --- KROK 1: PRÓBKA ---
-        if st.button("👁️ Pokaż Próbkę (Styl)"):
-            if not salon or not cel or target.empty:
-                st.error("Uzupełnij dane!")
+        # --- ZAKŁADKA 2: LISTA KLIENTÓW ---
+        with tab_list:
+            clients = get_clients(user_id)
+            if clients:
+                st.write(f"Baza klientek: {len(clients)}")
+                for client in clients:
+                    with st.expander(f"{client.get('imie')} - {client.get('ostatni_zabieg')}"):
+                        st.write(f"Tel: {client.get('telefon')}")
+                        if st.button("Usuń", key=f"del_{client['id']}"):
+                            delete_client(client['id'])
+                            st.rerun()
             else:
-                sample = target.iloc[0]
-                with st.spinner("AI wymyśla coś miłego..."):
-                    # Korzystamy z utils.py do generowania
-                    msg = utils.generate_single_message(salon, cel, sample['imie'], sample['ostatni_zabieg'])
-                    st.session_state['preview_msg'] = msg
-        
-        # --- KROK 2: WYSYŁKA Z PODGLĄDEM LIVE ---
-        if st.session_state['preview_msg']:
-            st.info("👇 Przykładowy styl wiadomości:")
-            st.code(st.session_state['preview_msg'], language='text')
-            st.caption("AI wygeneruje unikalną, ciepłą wiadomość dla każdej osoby z listy, zachowując ten styl.")
+                st.info("Brak klientek.")
+
+        # --- ZAKŁADKA 3: KAMPANIA AI (To tutaj był błąd wcięcia) ---
+        with tab_campaign:
+            st.subheader("Generator wiadomości SMS")
+            clients = get_clients(user_id)
             
-            st.write("---")
-            mode = st.radio("Tryb:", ["🧪 Test (Symulacja)", "💸 Produkcja (Płatny SMSAPI)"])
-            is_test = (mode == "🧪 Test (Symulacja)")
-            
-           if st.button("🚀 Generuj wiadomości"):
-    progress_bar = st.progress(0)
-    
-    for index, row in df.iterrows(): # df to twoja tabela z klientami
-        
-        # Wywołanie Twojej funkcji z utils
-        wiadomosc = generate_single_message(
-            salon_name="KOX BEAUTY",
-            campaign_goal="promocja swiateczna -15%",
-            client_name=row['Imię'],
-            last_treatment=row.get('Ostatni Zabieg', 'stylizacja')
-        )
-        
-        st.write(f"**Do:** {row['Imię']} ({row['Telefon']})")
-        st.info(wiadomosc)
-        
-        # WAŻNE: Odczekaj chwilę, żeby nie zablokować API Google
-        time.sleep(1.5) 
-        
-        # Aktualizacja paska postępu
-        progress_bar.progress((index + 1) / len(df))
+            if not clients:
+                st.warning("Najpierw dodaj klientki w zakładce 'Lista'!")
+            else:
+                # Pola konfiguracji kampanii
+                cel_kampanii = st.text_input("Cel kampanii (np. promocja -15% na święta)", value="promocja -15% do końca tygodnia")
+                
+                # Przycisk generowania
+                if st.button("🚀 Generuj propozycje SMS"):
+                    st.write("---")
+                    progress_bar = st.progress(0)
+                    
+                    # Konwersja listy słowników na DataFrame dla łatwiejszej obsługi
+                    df = pd.DataFrame(clients)
+                    
+                    for index, row in df.iterrows():
+                        imie = row.get('imie', 'Klientka')
+                        zabieg = row.get('ostatni_zabieg', 'wizyta')
+                        salon = "Twój Salon" # Możesz tu wpisać nazwę na sztywno lub pobrać z ustawień
+
+                        # Generowanie przez AI (z pliku utils.py)
+                        wiadomosc = generate_single_message(salon, cel_kampanii, imie, zabieg)
+                        
+                        # Wyświetlanie wyniku
+                        st.markdown(f"**Do:** {imie}")
+                        st.info(wiadomosc)
+                        
+                        # Ważne opóźnienie dla API
+                        time.sleep(1.5)
+                        progress_bar.progress((index + 1) / len(df))
+                    
+                    st.success("Gotowe! Możesz kopiować wiadomości.")
+
+if __name__ == "__main__":
+    main()
