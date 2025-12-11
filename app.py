@@ -157,13 +157,8 @@ with st.sidebar:
 
 # Funkcje DB
 def add_client(imie, telefon, zabieg, data):
-    try:
-        supabase.table("klientki").insert({
-            "salon_id": SALON_ID, "imie": imie, "telefon": telefon,
-            "ostatni_zabieg": zabieg, "data_wizyty": str(data)
-        }).execute()
-        return True
-    except: return False
+    # 1. Naprawa daty (Pusty string "" wywala bazę, musi być None)
+    data_val = str(data) if data and str(data).strip() != "" else None
 
 def get_clients():
     try:
@@ -271,29 +266,27 @@ if page == "📂 Baza Klientek":
                         to_import = edited_df[edited_df["Dodaj"] == True]
                         count = len(to_import)
                         
-                        if st.button(f"✅ ZAPISZ {count} KONTAKTÓW"):
-                            if count > 0:
-                                progress = st.progress(0)
-                                added = 0
-                                for idx, row in to_import.iterrows():
-                                    add_client(
-                                        str(row["Imię"]), str(row["Telefon"]), 
-                                        str(row["Ostatni Zabieg"]), "" 
-                                    )
-                                    added += 1
-                                    progress.progress(added / count)
-                                
-                                st.success(f"Sukces! Dodano {added} klientek.")
-                                time.sleep(1.5)
-                                st.rerun()
-                            else:
-                                st.warning("Nikogo nie zaznaczono!")
-                    else:
-                        st.error("Nie znaleziono kolumn Imię/Telefon.")
-            
-            except Exception as e:
-                st.error(f"Błąd pliku: {e}")
+                        if st.button(f" ZAPISZ {count} KONTAKTÓW"):
+                        if count > 0:
+                            progress = st.progress(0)
+                            added_real = 0
+                            errors = []
 
+                            for idx, row in to_import.iterrows():
+                                # Próbujemy dodać
+                                sukces, komunikat = add_client(
+                                    str(row["Imię"]), 
+                                    str(row["Telefon"]), 
+                                    str(row["Ostatni Zabieg"]), 
+                                    None # Ważne: wysyłamy None zamiast pustego stringa ""
+                                )
+
+                                if sukces:
+                                    added_real += 1
+                                else:
+                                    errors.append(f"{row['Imię']}: {komunikat}")
+
+                                progress.progress((idx + 1) / count)
     # --- RĘCZNE DODAWANIE ---
     with st.expander("➕ Dodaj pojedynczo (Ręcznie)"):
         c1, c2 = st.columns(2)
@@ -375,3 +368,4 @@ elif page == "🤖 Automat SMS":
                 if st.button("🚀 2. Wyślij", type="primary" if not is_test else "secondary"):
                     send_campaign_sms(target_df, campaign_goal, st.session_state['sms_preview'], is_test)
                     st.session_state['sms_preview'] = None
+
