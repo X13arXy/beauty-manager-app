@@ -173,3 +173,4 @@ elif page == "🤖 Automat SMS":
                 st.balloons()
                 st.success("Zakończono!")
 
+
