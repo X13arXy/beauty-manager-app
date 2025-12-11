@@ -61,6 +61,39 @@ def usun_ogonki(tekst):
         tekst = tekst.replace(pl, latin)
     return tekst
 
+def parse_vcf(file_content):
+    """Czyta pliki kontaktów z telefonu (.vcf)"""
+    try:
+        content = file_content.decode("utf-8")
+    except UnicodeDecodeError:
+        content = file_content.decode("latin-1")
+        
+    contacts = []
+    current_contact = {}
+    
+    for line in content.splitlines():
+        if line.startswith("BEGIN:VCARD"):
+            current_contact = {}
+        elif line.startswith("FN:") or line.startswith("N:"): 
+            if "Imię" not in current_contact:
+                parts = line.split(":", 1)[1]
+                current_contact["Imię"] = parts.replace(";", " ").strip()
+        elif line.startswith("TEL"): 
+            if "Telefon" not in current_contact: 
+                number = line.split(":", 1)[1]
+                clean_number = ''.join(filter(str.isdigit, number))
+                if len(clean_number) > 9 and clean_number.startswith("48"):
+                    clean_number = clean_number 
+                elif len(clean_number) == 9:
+                    clean_number = "48" + clean_number 
+                current_contact["Telefon"] = clean_number
+        elif line.startswith("END:VCARD"):
+            if "Imię" in current_contact and "Telefon" in current_contact:
+                current_contact["Ostatni Zabieg"] = "Nieznany"
+                contacts.append(current_contact)
+    
+    return pd.DataFrame(contacts)
+
 def login_user(email, password):
     try:
         response = supabase.auth.sign_in_with_password({"email": email, "password": password})
@@ -119,7 +152,7 @@ def send_campaign_sms(target_df, campaign_goal, generated_text, is_test_mode):
             try:
                 client.sms.send(to=row['telefon'], message=clean_text)
                 st.success(f"✅ Wysłano do: {row['imie']}")
-            except Exception as e:
+            except Exception as e: # Catch generic exception
                 st.error(f"Błąd bramki SMS dla {row['imie']}: {e}")
             
         time.sleep(1)
@@ -155,10 +188,23 @@ with st.sidebar:
     if st.button("Wyloguj"): logout_user()
     st.divider()
 
-# Funkcje DB
+# Funkcje DB - WERSJA POPRAWIONA (ZWRACA BŁĘDY)
 def add_client(imie, telefon, zabieg, data):
-    # 1. Naprawa daty (Pusty string "" wywala bazę, musi być None)
+    # Czyścimy dane
+    clean_tel = ''.join(filter(str.isdigit, str(telefon)))
     data_val = str(data) if data and str(data).strip() != "" else None
+
+    try:
+        supabase.table("klientki").insert({
+            "salon_id": SALON_ID, 
+            "imie": str(imie), 
+            "telefon": clean_tel,
+            "ostatni_zabieg": str(zabieg), 
+            "data_wizyty": data_val
+        }).execute()
+        return True, "" # Sukces, pusty błąd
+    except Exception as e:
+        return False, str(e) # Błąd, treść błędu
 
 def get_clients():
     try:
@@ -178,39 +224,6 @@ page = st.sidebar.radio("Menu", ["📂 Baza Klientek", "🤖 Automat SMS"])
 # ========================================================
 if page == "📂 Baza Klientek":
     st.header("Twoja Baza")
-
-    # --- FUNKCJA DO CZYTANIA PLIKÓW VCF (Z TELEFONU) ---
-    def parse_vcf(file_content):
-        try:
-            content = file_content.decode("utf-8")
-        except UnicodeDecodeError:
-            content = file_content.decode("latin-1") 
-            
-        contacts = []
-        current_contact = {}
-        
-        for line in content.splitlines():
-            if line.startswith("BEGIN:VCARD"):
-                current_contact = {}
-            elif line.startswith("FN:") or line.startswith("N:"): 
-                if "Imię" not in current_contact:
-                    parts = line.split(":", 1)[1]
-                    current_contact["Imię"] = parts.replace(";", " ").strip()
-            elif line.startswith("TEL"): 
-                if "Telefon" not in current_contact: 
-                    number = line.split(":", 1)[1]
-                    clean_number = ''.join(filter(str.isdigit, number))
-                    if len(clean_number) > 9 and clean_number.startswith("48"):
-                        clean_number = clean_number 
-                    elif len(clean_number) == 9:
-                        clean_number = "48" + clean_number 
-                    current_contact["Telefon"] = clean_number
-            elif line.startswith("END:VCARD"):
-                if "Imię" in current_contact and "Telefon" in current_contact:
-                    current_contact["Ostatni Zabieg"] = "Nieznany"
-                    contacts.append(current_contact)
-        
-        return pd.DataFrame(contacts)
 
     # --- SEKCJA IMPORTU ---
     with st.expander("📥 IMPORT Z TELEFONU (Wgraj plik)", expanded=False):
@@ -262,31 +275,48 @@ if page == "📂 Baza Klientek":
                             }
                         )
                         
-                        # Zapisywanie
+                        # Zapisywanie (POPRAWIONA WERSJA Z BŁĘDAMI)
                         to_import = edited_df[edited_df["Dodaj"] == True]
                         count = len(to_import)
                         
-                        if st.button(f" ZAPISZ {count} KONTAKTÓW"):
-                        if count > 0:
-                            progress = st.progress(0)
-                            added_real = 0
-                            errors = []
+                        if st.button(f"✅ ZAPISZ {count} KONTAKTÓW"):
+                            if count > 0:
+                                progress = st.progress(0)
+                                added_real = 0
+                                errors = []
+                                
+                                for idx, row in to_import.iterrows():
+                                    # Dodajemy i sprawdzamy wynik
+                                    sukces, msg = add_client(
+                                        str(row["Imię"]), 
+                                        str(row["Telefon"]), 
+                                        str(row["Ostatni Zabieg"]), 
+                                        None 
+                                    )
+                                    if sukces:
+                                        added_real += 1
+                                    else:
+                                        errors.append(f"{row['Imię']}: {msg}")
+                                        
+                                    progress.progress((idx + 1) / count)
+                                
+                                if added_real > 0:
+                                    st.success(f"✅ Sukces! Faktycznie dodano: {added_real} klientek.")
+                                    time.sleep(1.5)
+                                    st.rerun()
+                                
+                                if errors:
+                                    st.error(f"❌ Błędy przy {len(errors)} osobach:")
+                                    with st.expander("Szczegóły błędów"):
+                                        for e in errors: st.write(e)
+                            else:
+                                st.warning("Nikogo nie zaznaczono!")
+                    else:
+                        st.error("Nie znaleziono kolumn Imię/Telefon.")
+            
+            except Exception as e:
+                st.error(f"Błąd pliku: {e}")
 
-                            for idx, row in to_import.iterrows():
-                                # Próbujemy dodać
-                                sukces, komunikat = add_client(
-                                    str(row["Imię"]), 
-                                    str(row["Telefon"]), 
-                                    str(row["Ostatni Zabieg"]), 
-                                    None # Ważne: wysyłamy None zamiast pustego stringa ""
-                                )
-
-                                if sukces:
-                                    added_real += 1
-                                else:
-                                    errors.append(f"{row['Imię']}: {komunikat}")
-
-                                progress.progress((idx + 1) / count)
     # --- RĘCZNE DODAWANIE ---
     with st.expander("➕ Dodaj pojedynczo (Ręcznie)"):
         c1, c2 = st.columns(2)
@@ -295,8 +325,12 @@ if page == "📂 Baza Klientek":
         zabieg = c2.text_input("Zabieg", "Manicure")
         data = c2.date_input("Data")
         if st.button("Zapisz ręcznie"):
-            add_client(imie, tel, zabieg, data)
-            st.rerun()
+            sukces, msg = add_client(imie, tel, zabieg, data)
+            if sukces:
+                st.success("Dodano!")
+                st.rerun()
+            else:
+                st.error(f"Błąd: {msg}")
 
     # --- LISTA KLIENTEK ---
     df = get_clients()
