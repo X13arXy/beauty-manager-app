@@ -31,10 +31,10 @@ except Exception as e:
     st.error(f"❌ Błąd połączenia Supabase: {e}")
     st.stop()
 
-# AI
+# AI - Używamy Flash, bo jest najszybszy do "hurtowego" przetwarzania
 try:
     genai.configure(api_key=GOOGLE_API_KEY)
-    model = genai.GenerativeModel('models/gemini-flash-latest')
+    model = genai.GenerativeModel('models/gemini-1.5-flash-latest')
 except Exception as e:
     st.error(f"❌ Błąd konfiguracji Gemini: {e}")
     st.stop()
@@ -60,7 +60,6 @@ def usun_ogonki(tekst):
     return tekst
 
 def parse_vcf(file_content):
-    """Czyta pliki kontaktów z telefonu (.vcf)"""
     try:
         content = file_content.decode("utf-8")
     except UnicodeDecodeError:
@@ -118,8 +117,8 @@ def logout_user():
     st.session_state['user'] = None
     st.rerun()
 
-# --- FUNKCJA WYSYŁAJĄCA - TERAZ GENERUJE DLA KAŻDEGO OSOBNO ---
-def send_campaign_smart(target_df, campaign_goal, salon_name, is_test_mode):
+# --- NOWA FUNKCJA: WYSYŁKA HURTOWA (BATCHING) ---
+def send_campaign_batch(target_df, campaign_goal, salon_name, is_test_mode):
     sms_token = st.secrets.get("SMSAPI_TOKEN", "")
     client = None
 
@@ -134,55 +133,75 @@ def send_campaign_smart(target_df, campaign_goal, salon_name, is_test_mode):
             return
 
     st.write("---")
-    progress_bar = st.progress(0)
+    progress_bar = st.progress(0.0)
     
-    # Wyłączenie filtrów bezpieczeństwa (żeby nie blokowało słów 'ciało', 'skóra')
-    safety = [
-        {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-        {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-        {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
-        {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
-    ]
+    # Dzielimy klientów na paczki po 5 osób (żeby nie zatkać AI)
+    BATCH_SIZE = 5
+    total_clients = len(target_df)
+    
+    # Konwersja DataFrame na listę słowników dla łatwiejszej obsługi
+    clients_list = target_df.to_dict('records')
+    
+    for i in range(0, total_clients, BATCH_SIZE):
+        batch = clients_list[i : i + BATCH_SIZE]
+        
+        # Budujemy prompt dla całej paczki
+        lista_klientow_txt = ""
+        for idx, c in enumerate(batch):
+            lista_klientow_txt += f"ID {idx}: Imię: {c['imie']}, Ostatni zabieg: {c['ostatni_zabieg']}\n"
 
-    for index, row in target_df.iterrows():
-        # 1. GENERUJEMY UNIKALNĄ TREŚĆ DLA KAŻDEGO
         prompt = f"""
-        Jesteś recepcjonistką w salonie: {salon_name}.
-        Napisz krótki SMS do klientki: {row['imie']}.
-        Ostatni zabieg: {row['ostatni_zabieg']}.
+        Jesteś recepcjonistką w salonie "{salon_name}".
         Cel kampanii: {campaign_goal}.
-
+        
+        Masz tutaj listę {len(batch)} klientek. Napisz dla KAŻDEJ z nich osobny SMS.
+        
+        DANE KLIENTEK:
+        {lista_klientow_txt}
+        
         ZASADY:
-        1. Zacznij od odmienionego imienia (np. "Cześć Kasiu").
-        2. Bądź miła i naturalna.
-        3. Podpisz się: {salon_name}.
-        4. Max 160 znaków.
-        5. NIE używaj polskich znaków (ą, ę -> a, e).
+        1. Rozdziel wiadomości znakiem "|||".
+        2. Nie numeruj wiadomości, tylko sama treść.
+        3. Kolejność musi być zachowana (pierwszy SMS dla ID 0, drugi dla ID 1 itd.).
+        4. Bez polskich znaków. Max 160 znaków na SMS.
+        5. Podpisz się: {salon_name}.
         """
         
         try:
-            res = model.generate_content(prompt, safety_settings=safety)
-            if res.text:
-                clean_text = usun_ogonki(res.text.strip())
-            else:
-                clean_text = f"Czesc {row['imie']}! Zapraszamy do {salon_name}." # Awaryjna treść
-        except:
-            clean_text = f"Czesc {row['imie']}! Zapraszamy do {salon_name}."
-
-        # 2. WYSYŁKA
-        if is_test_mode:
-            st.code(f"DO: {row['imie']} ({row['telefon']})\nTREŚĆ: {clean_text}", language='text')
-            st.success(f"🧪 [TEST] Symulacja dla: {row['imie']}")
-        else:
-            try:
-                client.sms.send(to=row['telefon'], message=clean_text)
-                st.success(f"✅ Wysłano do: {row['imie']}")
-            except Exception as e:
-                st.error(f"Błąd bramki SMS dla {row['imie']}: {e}")
+            # Generujemy 5 SMSów na raz
+            response = model.generate_content(prompt)
+            raw_response = response.text.strip()
+            messages = raw_response.split("|||")
             
-        time.sleep(1.5) # Mała przerwa dla API Google
-        progress_bar.progress((index + 1) / len(target_df))
-    
+            # Jeśli AI zwróciło mniej wiadomości niż trzeba, dorabiamy awaryjne
+            while len(messages) < len(batch):
+                messages.append(f"Czesc! Zapraszamy do {salon_name} na wizyte.")
+
+        except Exception as e:
+            st.error(f"Błąd AI przy paczce: {e}")
+            # Fallback dla całej paczki
+            messages = [f"Czesc {c['imie']}! Zapraszamy do {salon_name}." for c in batch]
+
+        # Wysyłamy (lub symulujemy) dla tej paczki
+        for j, person in enumerate(batch):
+            if j < len(messages):
+                msg_content = usun_ogonki(messages[j].strip())
+                
+                if is_test_mode:
+                    st.code(f"DO: {person['imie']} ({person['telefon']})\nTREŚĆ: {msg_content}", language='text')
+                else:
+                    try:
+                        client.sms.send(to=str(person['telefon']), message=msg_content)
+                        st.toast(f"✅ Wysłano do: {person['imie']}")
+                    except Exception as e:
+                        st.error(f"Błąd wysyłki: {e}")
+        
+        # Aktualizacja paska postępu
+        current_prog = min((i + BATCH_SIZE) / total_clients, 1.0)
+        progress_bar.progress(current_prog)
+        
+        time.sleep(2) # Odpoczynek dla API po każdej paczce
+
     st.balloons()
     st.success("🎉 Kampania zakończona!")
 
@@ -215,17 +234,12 @@ with st.sidebar:
 
 # Funkcje DB
 def add_client(imie, telefon, zabieg, data):
-    # Czyścimy dane
     clean_tel = ''.join(filter(str.isdigit, str(telefon)))
     data_val = str(data) if data and str(data).strip() != "" else None
-
     try:
         supabase.table("klientki").insert({
-            "salon_id": SALON_ID, 
-            "imie": str(imie), 
-            "telefon": clean_tel,
-            "ostatni_zabieg": str(zabieg), 
-            "data_wizyty": data_val
+            "salon_id": SALON_ID, "imie": str(imie), "telefon": clean_tel,
+            "ostatni_zabieg": str(zabieg), "data_wizyty": data_val
         }).execute()
         return True, ""
     except Exception as e:
@@ -271,8 +285,8 @@ if page == "📂 Baza Klientek":
                     if col_imie and col_tel:
                         df_to_show = pd.DataFrame({
                             "Dodaj": True, 
-                            "Imię": df_import[col_imie],
-                            "Telefon": df_import[col_tel],
+                            "Imię": df_import[col_imie], 
+                            "Telefon": df_import[col_tel], 
                             "Ostatni Zabieg": "Nieznany"
                         })
                         st.markdown("### 🕵️‍♀️ Wybierz kogo dodać:")
@@ -297,6 +311,7 @@ if page == "📂 Baza Klientek":
                                     if sukces: added_real += 1
                                     else: errors.append(f"{row['Imię']}: {msg}")
                                     
+                                    # Fix na postęp > 1.0
                                     current_prog = (i + 1) / count
                                     if current_prog > 1.0: current_prog = 1.0
                                     progress.progress(current_prog)
@@ -338,10 +353,10 @@ if page == "📂 Baza Klientek":
             delete_client(to_del)
             st.rerun()
     else:
-        st.info("Baza pusta.")
+        st.info("Baza pusta. Użyj importu powyżej!")
 
 # ========================================================
-# 🤖 ZAKŁADKA 2: AUTOMAT SMS (FULL PERSONALIZACJA)
+# 🤖 ZAKŁADKA 2: AUTOMAT SMS (WERSJA HURTOWA)
 # ========================================================
 elif page == "🤖 Automat SMS":
     st.header("Generator SMS AI")
@@ -362,8 +377,7 @@ elif page == "🤖 Automat SMS":
         
         if salon_name and not target_df.empty:
             
-            st.info(f"Odbiorcy: {len(target_df)} osób. AI wygeneruje unikalną treść dla każdej z nich.")
-            
+            st.info(f"Odbiorcy: {len(target_df)} osób.")
             st.write("---")
             mode = st.radio("Wybierz tryb:", ["🧪 Tryb Testowy (Symulacja)", "💸 Tryb Produkcyjny (Płatny)"])
             is_test = (mode == "🧪 Tryb Testowy (Symulacja)")
@@ -371,5 +385,5 @@ elif page == "🤖 Automat SMS":
             btn_text = "🚀 URUCHOM KAMPANIĘ" if not is_test else "🧪 URUCHOM SYMULACJĘ"
             
             if st.button(btn_text, type="primary"):
-                # Uruchamiamy INTELIGENTNĄ pętlę
-                send_campaign_smart(target_df, campaign_goal, salon_name, is_test)
+                # Uruchamiamy funkcję HURTOWĄ
+                send_campaign_batch(target_df, campaign_goal, salon_name, is_test)
