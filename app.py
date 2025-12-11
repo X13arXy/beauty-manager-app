@@ -4,45 +4,51 @@ import time
 from datetime import date
 import pandas as pd
 
-# Import utils
+# --- 0. IMPORT FUNKCJI Z UTILS ---
 try:
     from utils import generate_single_message_debug, parse_vcf
 except ImportError:
-    st.error("Brak pliku utils.py!")
+    st.error("Brak pliku utils.py! Upewnij się, że wgrałeś oba pliki.")
     st.stop()
 
+# --- 1. KONFIGURACJA STRONY ---
 st.set_page_config(page_title="Manager Klientek", page_icon="💅")
 
-# --- DATABASE SETUP ---
+# --- 2. BAZA DANYCH ---
 def init_supabase():
     try:
         url = st.secrets["SUPABASE_URL"]
         key = st.secrets["SUPABASE_KEY"]
         return create_client(url, key)
     except Exception as e:
-        st.error(f"❌ Błąd połączenia z bazą: {e}")
+        st.error(f"❌ Błąd konfiguracji bazy: {e}")
         st.stop()
 
 supabase = init_supabase()
 
-if 'user' not in st.session_state: st.session_state['user'] = None
+# Inicjalizacja sesji (zapobiega wylogowaniu po odświeżeniu)
+if 'user' not in st.session_state:
+    st.session_state['user'] = None
 
-# --- AUTH & DB FUNCTIONS ---
+# --- 3. FUNKCJE LOGOWANIA I DANYCH ---
 def login_user(email, password):
     try:
         res = supabase.auth.sign_in_with_password({"email": email, "password": password})
         st.session_state['user'] = res.user
-        st.success("✅ Zalogowano!")
-        time.sleep(1); st.rerun()
-    except Exception as e: st.error(f"Błąd: {e}")
+        return True
+    except Exception as e:
+        st.error(f"Błąd logowania: {e}")
+        return False
 
 def register_user(email, password):
     try:
         res = supabase.auth.sign_up({"email": email, "password": password})
         if res.user:
             st.session_state['user'] = res.user
-            st.success("✅ Konto utworzone!"); time.sleep(1); st.rerun()
-    except Exception as e: st.error(f"Błąd: {e}")
+            return True
+    except Exception as e:
+        st.error(f"Błąd rejestracji: {e}")
+        return False
 
 def logout_user():
     supabase.auth.sign_out()
@@ -70,117 +76,165 @@ def delete_client(cid):
     try: supabase.table("klientki").delete().eq("id", cid).execute(); return True
     except: return False
 
-# --- UI MAIN ---
+# --- 4. INTERFEJS GŁÓWNY ---
 def main():
     st.title("🌸 Salon Manager AI")
 
+    # A. EKRAN LOGOWANIA (NAPRAWIONY - UŻYWA FORMULARZY)
     if not st.session_state['user']:
-        t1, t2 = st.tabs(["Logowanie", "Rejestracja"])
-        with t1:
-            if st.button("Zaloguj", key="l"): login_user(st.text_input("E", key="le"), st.text_input("P", type="password", key="lp"))
-        with t2:
-            if st.button("Rejestruj", key="r"): register_user(st.text_input("E", key="re"), st.text_input("P", type="password", key="rp"))
+        tab1, tab2 = st.tabs(["Logowanie", "Rejestracja"])
+        
+        # --- LOGOWANIE ---
+        with tab1:
+            st.write("Wpisz dane i zatwierdź przyciskiem.")
+            with st.form("login_form"):
+                email = st.text_input("Email")
+                password = st.text_input("Hasło", type="password")
+                
+                # Przycisk jest wewnątrz formularza - strona nie odświeży się za wcześnie
+                submit = st.form_submit_button("Zaloguj się")
+                
+                if submit:
+                    if login_user(email, password):
+                        st.success("✅ Zalogowano!")
+                        time.sleep(1)
+                        st.rerun()
+
+        # --- REJESTRACJA ---
+        with tab2:
+            st.write("Załóż nowe konto.")
+            with st.form("register_form"):
+                new_email = st.text_input("Email")
+                new_pass = st.text_input("Hasło", type="password")
+                
+                reg_submit = st.form_submit_button("Zarejestruj się")
+                
+                if reg_submit:
+                    if register_user(new_email, new_pass):
+                        st.success("✅ Konto utworzone! Witaj.")
+                        time.sleep(1)
+                        st.rerun()
+
+    # B. PANEL UŻYTKOWNIKA (PO ZALOGOWANIU)
     else:
         user_id = st.session_state['user'].id
+        
+        # Sidebar
         with st.sidebar:
-            st.write(f"Konto: {st.session_state['user'].email}")
-            if st.button("Wyloguj"): logout_user()
+            st.write(f"Zalogowany: {st.session_state['user'].email}")
+            if st.button("Wyloguj"):
+                logout_user()
 
+        # Zakładki
         tab_add, tab_list, tab_ai = st.tabs(["➕ Dodaj / Import", "📋 Lista", "🤖 Kampania AI"])
 
+        # --- 1. DODAWANIE ---
         with tab_add:
-            st.info("Opcje dodawania klientek")
-            with st.form("manual"):
-                c1, c2 = st.columns(2)
-                i = c1.text_input("Imię"); t = c1.text_input("Tel")
-                z = c2.text_input("Zabieg"); d = c2.date_input("Data")
-                if st.form_submit_button("Dodaj"):
-                    ok, m = add_client(user_id, i, t, z, d)
-                    if ok: st.success("Dodano!"); time.sleep(1); st.rerun()
+            st.info("Dodaj klientkę ręcznie lub z pliku")
             
-            uploaded = st.file_uploader("Import VCF", type=['vcf'])
+            # Formularz ręczny
+            with st.form("manual_add"):
+                c1, c2 = st.columns(2)
+                i = c1.text_input("Imię i Nazwisko")
+                t = c1.text_input("Telefon")
+                z = c2.text_input("Zabieg")
+                d = c2.date_input("Data wizyty", value=date.today())
+                
+                if st.form_submit_button("Zapisz klientkę"):
+                    if i:
+                        ok, m = add_client(user_id, i, t, z, d)
+                        if ok: 
+                            st.success("Dodano!")
+                            time.sleep(1)
+                            st.rerun()
+                        else: st.error(f"Błąd: {m}")
+                    else: st.warning("Podaj imię!")
+            
+            st.divider()
+            
+            # Import pliku
+            st.write("📥 **Import kontaktów (VCF)**")
+            uploaded = st.file_uploader("Wgraj plik .vcf z telefonu", type=['vcf'])
             if uploaded:
                 df = parse_vcf(uploaded.read())
                 st.dataframe(df.head())
-                if st.button("Zapisz VCF do bazy"):
-                    for _, r in df.iterrows():
-                        add_client(user_id, r['Imię'], r['Telefon'], r.get('Ostatni Zabieg','Import'), None)
-                    st.success("Zaimportowano!"); time.sleep(1); st.rerun()
+                if st.button("💾 Zapisz te kontakty w bazie"):
+                    progress = st.progress(0)
+                    for idx, row in df.iterrows():
+                        add_client(user_id, row['Imię'], row['Telefon'], row.get('Ostatni Zabieg', 'Import'), None)
+                        progress.progress((idx + 1) / len(df))
+                    st.success("Zaimportowano!")
+                    time.sleep(1.5)
+                    st.rerun()
 
+        # --- 2. LISTA ---
         with tab_list:
-            cl = get_clients(user_id)
-            for c in cl:
-                with st.expander(f"{c['imie']}"):
-                    st.write(f"Tel: {c['telefon']}"); 
-                    if st.button("Usuń", key=f"d{c['id']}"): delete_client(c['id']); st.rerun()
+            clients = get_clients(user_id)
+            if clients:
+                st.write(f"Liczba klientek: {len(clients)}")
+                for c in clients:
+                    with st.expander(f"{c.get('imie', '---')} ({c.get('telefon', '')})"):
+                        st.write(f"Zabieg: {c.get('ostatni_zabieg')}")
+                        if st.button("Usuń", key=f"del_{c['id']}"):
+                            delete_client(c['id'])
+                            st.rerun()
+            else:
+                st.info("Baza pusta. Dodaj kogoś!")
 
-        # --- SEKCJA KAMPANII (TUTAJ NAJWIĘKSZE ZMIANY) ---
+        # --- 3. KAMPANIA AI (Z TESTAMI) ---
         with tab_ai:
             st.header("Generator Kampanii")
             clients = get_clients(user_id)
             
             if not clients:
-                st.warning("Brak klientów w bazie.")
+                st.warning("Dodaj najpierw klientki w zakładce 'Dodaj'!")
             else:
-                # 1. Konfiguracja
-                col_conf1, col_conf2 = st.columns(2)
-                with col_conf1:
-                    salon_name = st.text_input("Nazwa Salonu", "KOX BEAUTY")
-                with col_conf2:
-                    campaign_goal = st.text_input("Cel Kampanii", "Promocja -20% na hasło ZIMA")
-
-                st.divider()
-
-                # 2. LABORATORIUM TESTOWE (Bezpieczne, 1 sztuka)
-                st.subheader("🧪 Krok 1: Laboratorium Testowe")
-                st.caption("Sprawdź co wymyśli AI zanim wyślesz do wszystkich. To nic nie kosztuje (poza tokenami AI).")
+                col1, col2 = st.columns(2)
+                with col1: salon = st.text_input("Nazwa Salonu", "Twój Salon")
+                with col2: cel = st.text_input("Cel Kampanii", "Promocja -20% na hasło ZIMA")
                 
-                # Lista wyboru klienta do testu
-                client_options = {c['imie']: c for c in clients}
-                selected_name = st.selectbox("Wybierz klientkę do testu:", list(client_options.keys()))
-                test_client = client_options[selected_name]
+                st.divider()
+                st.subheader("🧪 Krok 1: Test (Sprawdź zanim wyślesz)")
+                
+                # Wybór osoby do testu
+                client_map = {c['imie']: c for c in clients}
+                test_person_name = st.selectbox("Na kim testujemy?", list(client_map.keys()))
+                test_person = client_map[test_person_name]
 
-                if st.button("🧪 GENERUJ TEST (1 sztuka)"):
-                    msg, prompt, error = generate_single_message_debug(
-                        salon_name, campaign_goal, test_client['imie'], test_client['ostatni_zabieg']
+                if st.button("🧬 Generuj TEST (1 sztuka)"):
+                    msg, prompt, err = generate_single_message_debug(
+                        salon, cel, test_person['imie'], test_person['ostatni_zabieg']
                     )
-
-                    if error:
-                        st.error(f"❌ Błąd AI: {error}")
-                        st.info("💡 Wskazówka: Sprawdź czy masz poprawny 'GOOGLE_API_KEY' w pliku .streamlit/secrets.toml")
+                    
+                    if err:
+                        st.error(f"Błąd AI: {err}")
+                        st.info("Sprawdź klucz API w secrets.toml")
                     else:
-                        c1, c2 = st.columns(2)
-                        with c1:
-                            st.success("✅ Wygenerowana wiadomość:")
-                            st.text_area("Wynik", value=msg, height=100)
-                        with c2:
-                            st.info("🧠 Co widziało AI (Prompt):")
+                        c_res1, c_res2 = st.columns(2)
+                        with c_res1:
+                            st.success("Wynik (SMS):")
+                            st.text_area("Gotowa wiadomość", value=msg, height=120)
+                        with c_res2:
+                            st.info("Logika (Prompt):")
                             st.code(prompt, language="text")
 
                 st.divider()
-
-                # 3. MASOWA PRODUKCJA
-                st.subheader("🚀 Krok 2: Generowanie Masowe")
-                st.caption("Gdy testy wyjdą dobrze, wygeneruj dla całej listy.")
+                st.subheader("🚀 Krok 2: Generowanie dla wszystkich")
                 
-                if st.button("Generuj dla wszystkich klientek"):
-                    progress = st.progress(0)
-                    for idx, client in enumerate(clients):
-                        msg, _, err = generate_single_message_debug(
-                            salon_name, campaign_goal, client['imie'], client['ostatni_zabieg']
-                        )
+                if st.button("Generuj całą listę"):
+                    prog = st.progress(0)
+                    for i, c in enumerate(clients):
+                        msg, _, err = generate_single_message_debug(salon, cel, c['imie'], c['ostatni_zabieg'])
                         
-                        with st.expander(f"Do: {client['imie']} {('❌ BŁĄD' if err else '✅')}"):
-                            if err:
-                                st.error(err)
+                        with st.expander(f"Do: {c['imie']}"):
+                            if err: st.error(err)
                             else:
-                                st.text_area(f"Treść dla {client['imie']}", value=msg, height=80)
-                                # Generowanie linku "Wyślij SMS"
-                                sms_link = f"sms:{client['telefon']}?body={msg}"
-                                st.markdown(f"[📲 Kliknij, aby otworzyć SMS]({sms_link})", unsafe_allow_html=True)
+                                st.text_area("Treść", msg, height=70)
+                                link = f"sms:{c['telefon']}?body={msg}"
+                                st.markdown(f"[📲 Otwórz w SMS]({link})")
                         
-                        time.sleep(1.5) # Ochrona przed banem API
-                        progress.progress((idx + 1) / len(clients))
+                        time.sleep(1.5)
+                        prog.progress((i+1)/len(clients))
 
 if __name__ == "__main__":
     main()
