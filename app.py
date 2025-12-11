@@ -31,10 +31,11 @@ except Exception as e:
     st.error(f"❌ Błąd połączenia Supabase: {e}")
     st.stop()
 
-# AI
+# AI - POPRAWIONA DEFINICJA MODELU (Bez błędów!)
 try:
     genai.configure(api_key=GOOGLE_API_KEY)
-    model = genai.GenerativeModel('gemini-1.5-flash')
+    # 👇 Czysta nazwa, bez ukośników:
+    model = genai.GenerativeModel('gemini-1.5-flash') 
 except Exception as e:
     st.error(f"❌ Błąd konfiguracji Gemini: {e}")
     st.stop()
@@ -47,7 +48,9 @@ except ImportError:
 
 # --- 2. STAN SESJI ---
 if 'user' not in st.session_state: st.session_state['user'] = None
-if 'preview_msg' not in st.session_state: st.session_state['preview_msg'] = None
+if 'sms_preview' not in st.session_state: st.session_state['sms_preview'] = None
+if 'preview_client' not in st.session_state: st.session_state['preview_client'] = None
+if 'campaign_goal' not in st.session_state: st.session_state['campaign_goal'] = ""
 if 'salon_name' not in st.session_state: st.session_state['salon_name'] = ""
 
 # --- 3. FUNKCJE POMOCNICZE ---
@@ -118,29 +121,7 @@ def logout_user():
     st.session_state['user'] = None
     st.rerun()
 
-# --- FUNKCJA GENERUJĄCA 1 WIADOMOŚĆ ---
-def generate_single_sms(salon_name, campaign_goal, client_name, last_treatment):
-    prompt = f"""
-    Jesteś recepcjonistką w salonie beauty "{salon_name}".
-    Napisz SMS do klientki: {client_name}.
-    Ostatni zabieg: {last_treatment}.
-    Cel: {campaign_goal}.
-    
-    ZASADY:
-    1. Użyj imienia w wołaczu (Cześć Kasiu).
-    2. Styl: Miły, ciepły, krótki.
-    3. Podpisz się: {salon_name}.
-    4. Pisz poprawnie po polsku (ogonki usuniemy później).
-    5. Max 160 znaków.
-    """
-    try:
-        res = model.generate_content(prompt)
-        return usun_ogonki(res.text.strip())
-    except Exception as e:
-        return f"Błąd AI: {e}"
-
-# --- FUNKCJA WYSYŁAJĄCA WSZYSTKO ---
-def send_all_campaign(target_df, campaign_goal, salon_name, is_test_mode):
+def send_campaign_smart(target_df, campaign_goal, salon_name, is_test_mode):
     sms_token = st.secrets.get("SMSAPI_TOKEN", "")
     client = None
 
@@ -156,36 +137,61 @@ def send_all_campaign(target_df, campaign_goal, salon_name, is_test_mode):
 
     st.write("---")
     progress_bar = st.progress(0.0)
-    count = len(target_df)
-    success_count = 0
     
-    status_text = st.empty() # Miejsce na komunikat co się dzieje
+    # Wyłączenie filtrów
+    safety = [
+        {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+        {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+        {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+        {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
+    ]
 
+    total = len(target_df)
+    
     for i, (index, row) in enumerate(target_df.iterrows()):
-        status_text.text(f"Generuję dla: {row['imie']}...")
         
-        # 1. Generujemy treść w locie dla każdego
-        msg_content = generate_single_sms(salon_name, campaign_goal, row['imie'], row['ostatni_zabieg'])
+        # 1. AI generuje treść
+        prompt = f"""
+        Jesteś recepcjonistką w salonie: {salon_name}.
+        Napisz krótki SMS do klientki: {row['imie']}.
+        Ostatni zabieg: {row['ostatni_zabieg']}.
+        Cel kampanii: {campaign_goal}.
+
+        ZASADY:
+        1. Zacznij od odmienionego imienia (np. "Cześć Kasiu").
+        2. Bądź miła i naturalna.
+        3. Podpisz się: {salon_name}.
+        4. Max 160 znaków.
+        5. Pisz POPRAWNĄ POLSZCZYZNĄ (używaj ą, ę - my to potem zmienimy).
+        """
         
-        # 2. Wysyłamy
+        try:
+            res = model.generate_content(prompt, safety_settings=safety)
+            if res.text:
+                clean_text = usun_ogonki(res.text.strip())
+            else:
+                clean_text = f"Czesc {row['imie']}! Zapraszamy do {salon_name}."
+        except:
+            clean_text = f"Czesc {row['imie']}! Zapraszamy do {salon_name}."
+
+        # 2. Wysyłka
         if is_test_mode:
-            # W trybie testowym pokazujemy tylko pierwsze 3 w logu, żeby nie zaśmiecać, reszta w tle
-            if i < 3:
-                st.code(f"DO: {row['imie']} ({row['telefon']})\nTREŚĆ: {msg_content}", language='text')
-            success_count += 1
+            st.code(f"DO: {row['imie']} ({row['telefon']})\nTREŚĆ: {clean_text}", language='text')
+            st.success(f"🧪 [TEST] Symulacja dla: {row['imie']}")
         else:
             try:
-                client.sms.send(to=str(row['telefon']), message=msg_content)
-                success_count += 1
+                client.sms.send(to=str(row['telefon']), message=clean_text)
+                st.success(f"✅ Wysłano do: {row['imie']}")
             except Exception as e:
-                st.error(f"Błąd wysyłki do {row['imie']}: {e}")
-        
-        time.sleep(1.5) # Odpoczynek dla AI
-        progress_bar.progress((i + 1) / count)
+                st.error(f"Błąd bramki SMS dla {row['imie']}: {e}")
+            
+        time.sleep(1.5)
+        prog = (i + 1) / total
+        if prog > 1.0: prog = 1.0
+        progress_bar.progress(prog)
     
-    status_text.empty()
     st.balloons()
-    st.success(f"🎉 Zakończono! Wysłano {success_count} z {count} wiadomości.")
+    st.success("🎉 Kampania zakończona!")
 
 # --- 4. EKRAN LOGOWANIA ---
 
@@ -241,7 +247,7 @@ st.title("Panel Salonu")
 page = st.sidebar.radio("Menu", ["📂 Baza Klientek", "🤖 Automat SMS"])
 
 # ========================================================
-# 📂 ZAKŁADKA 1: BAZA KLIENTEK
+# 📂 ZAKŁADKA 1: BAZA KLIENTEK (IMPORT Z TELEFONU)
 # ========================================================
 if page == "📂 Baza Klientek":
     st.header("Twoja Baza")
@@ -287,6 +293,7 @@ if page == "📂 Baza Klientek":
                                 progress = st.progress(0.0)
                                 added_real = 0
                                 errors = []
+                                
                                 for i, (index, row) in enumerate(to_import.iterrows()):
                                     sukces, msg = add_client(str(row["Imię"]), str(row["Telefon"]), str(row["Ostatni Zabieg"]), None)
                                     if sukces: added_real += 1
@@ -336,50 +343,34 @@ if page == "📂 Baza Klientek":
         st.info("Baza pusta. Użyj importu powyżej!")
 
 # ========================================================
-# 🤖 ZAKŁADKA 2: AUTOMAT SMS (PRÓBKA + MASZYNA)
+# 🤖 ZAKŁADKA 2: AUTOMAT SMS
 # ========================================================
 elif page == "🤖 Automat SMS":
     st.header("Generator SMS AI")
     df = get_clients()
     
     if df.empty:
-        st.warning("Baza pusta! Dodaj klientki.")
+        st.warning("Baza pusta!")
     else:
-        # --- KROK 1: KONFIGURACJA ---
-        st.subheader("1️⃣ Konfiguracja")
-        c1, c2 = st.columns(2)
-        salon_name = c1.text_input("Nazwa Salonu", value=st.session_state.get('salon_name', 'Glow Studio'))
+        st.write("### ⚙️ Konfiguracja")
+        salon_name = st.text_input("1. Nazwa salonu:", value=st.session_state['salon_name'])
         st.session_state['salon_name'] = salon_name
-        campaign_goal = c2.text_input("Cel (np. Promocja -20%):")
 
-        wybrane = st.multiselect("Do kogo?", df['imie'].tolist(), default=df['imie'].tolist())
+        campaign_goal = st.text_input("2. Cel Kampanii:", value=st.session_state['campaign_goal'])
+        st.session_state['campaign_goal'] = campaign_goal 
+
+        wybrane = st.multiselect("3. Odbiorcy:", df['imie'].tolist(), default=df['imie'].tolist())
         target_df = df[df['imie'].isin(wybrane)]
         
-        # --- KROK 2: PRÓBKA ---
-        if st.button("👁️ Zobacz PRÓBKĘ (1 SMS)"):
-            if not salon_name or not campaign_goal or target_df.empty:
-                st.error("Uzupełnij nazwę, cel i wybierz kogoś.")
-            else:
-                sample_client = target_df.iloc[0]
-                with st.spinner("AI pisze przykładowy SMS..."):
-                    msg = generate_single_sms(salon_name, campaign_goal, sample_client['imie'], sample_client['ostatni_zabieg'])
-                    st.session_state['preview_msg'] = msg
-        
-        # Wyświetlenie próbki
-        if st.session_state['preview_msg']:
-            st.info("👇 Tak będzie wyglądać wiadomość (styl):")
-            st.code(st.session_state['preview_msg'], language='text')
-            st.warning(f"Jeśli styl Ci pasuje, kliknij poniżej, aby wysłać do wszystkich {len(target_df)} osób. AI wygeneruje dla każdej unikalną treść w tym stylu.")
+        if salon_name and not target_df.empty:
+            
+            st.info(f"Odbiorcy: {len(target_df)} osób. AI wygeneruje unikalną treść dla każdej z nich.")
             
             st.write("---")
-            mode = st.radio("Tryb:", ["🧪 Test (Symulacja)", "💸 Produkcja (Płatny SMSAPI)"])
-            is_test = (mode == "🧪 Test (Symulacja)")
+            mode = st.radio("Wybierz tryb:", ["🧪 Tryb Testowy (Symulacja)", "💸 Tryb Produkcyjny (Płatny)"])
+            is_test = (mode == "🧪 Tryb Testowy (Symulacja)")
             
-            if st.button(f"🚀 WYŚLIJ DO WSZYSTKICH ({len(target_df)} osób)", type="primary"):
-                send_all_campaign(target_df, campaign_goal, salon_name, is_test)
-                st.session_state['preview_msg'] = None # Reset
-
-
-
-
-
+            btn_text = "🚀 URUCHOM KAMPANIĘ" if not is_test else "🧪 URUCHOM SYMULACJĘ"
+            
+            if st.button(btn_text, type="primary"):
+                send_campaign_smart(target_df, campaign_goal, salon_name, is_test)
