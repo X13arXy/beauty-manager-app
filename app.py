@@ -3,14 +3,15 @@ from supabase import create_client
 import time
 from datetime import date
 import pandas as pd
-# Importujemy funkcję AI z twojego drugiego pliku (zakładam, że nazywa się utils.py)
-# Jeśli plik nazywa się inaczej, zmień 'utils' na nazwę swojego pliku
-try:
-    from utils import generate_single_message
-except ImportError:
-    st.error("Brak pliku utils.py! Upewnij się, że jest w tym samym folderze.")
 
-# --- 1. KONFIGURACJA STRONY I BAZY ---
+# Import funkcji z utils.py
+try:
+    from utils import generate_single_message, parse_vcf
+except ImportError:
+    st.error("Brak pliku utils.py! Wgraj go do folderu aplikacji.")
+    st.stop()
+
+# --- 1. KONFIGURACJA ---
 st.set_page_config(page_title="Manager Klientek", page_icon="💅")
 
 def init_supabase():
@@ -27,7 +28,7 @@ supabase = init_supabase()
 if 'user' not in st.session_state:
     st.session_state['user'] = None
 
-# --- 2. FUNKCJE LOGIKI BIZNESOWEJ ---
+# --- 2. LOGIKA BAZY DANYCH ---
 def login_user(email, password):
     try:
         res = supabase.auth.sign_in_with_password({"email": email, "password": password})
@@ -54,58 +55,55 @@ def logout_user():
     st.session_state['user'] = None
     st.rerun()
 
-def add_client(user_id, imie, telefon, zabieg, data_wizyty):
+def add_client(salon_id, imie, telefon, zabieg, data):
     clean_tel = ''.join(filter(str.isdigit, str(telefon)))
-    data_val = str(data_wizyty) if data_wizyty else None
+    data_val = str(data) if data and str(data).strip() != "" else None
+    
     try:
         supabase.table("klientki").insert({
-            "salon_id": user_id,
+            "salon_id": salon_id,
             "imie": str(imie),
             "telefon": clean_tel,
             "ostatni_zabieg": str(zabieg),
             "data_wizyty": data_val
         }).execute()
-        return True, "Dodano klientkę!"
+        return True, ""
     except Exception as e:
         return False, str(e)
 
-def get_clients(user_id):
+def get_clients(salon_id):
     try:
-        res = supabase.table("klientki").select("*").eq("salon_id", user_id).order('created_at', desc=True).execute()
+        res = supabase.table("klientki").select("*").eq("salon_id", salon_id).order('created_at', desc=True).execute()
         return res.data
-    except Exception as e:
-        st.error(f"Błąd pobierania danych: {e}")
+    except:
         return []
 
 def delete_client(client_id):
     try:
         supabase.table("klientki").delete().eq("id", client_id).execute()
         return True
-    except Exception as e:
+    except:
         return False
 
-# --- 3. INTERFEJS UŻYTKOWNIKA (UI) ---
+# --- 3. INTERFEJS (UI) ---
 def main():
-    st.title("🌸 Salon Manager & AI")
+    st.title("🌸 Salon Manager")
 
-    # A. Widok dla niezalogowanych
     if not st.session_state['user']:
+        # EKRAN LOGOWANIA
         tab1, tab2 = st.tabs(["Logowanie", "Rejestracja"])
         with tab1:
-            st.subheader("Zaloguj się")
-            email = st.text_input("Email", key="login_email")
-            password = st.text_input("Hasło", type="password", key="login_pass")
+            email = st.text_input("Email", key="log_mail")
+            password = st.text_input("Hasło", type="password", key="log_pass")
             if st.button("Zaloguj"):
                 login_user(email, password)
         with tab2:
-            st.subheader("Załóż konto")
-            new_email = st.text_input("Email", key="reg_email")
-            new_pass = st.text_input("Hasło", type="password", key="reg_pass")
+            email = st.text_input("Email", key="reg_mail")
+            password = st.text_input("Hasło", type="password", key="reg_pass")
             if st.button("Zarejestruj"):
-                register_user(new_email, new_pass)
-
-    # B. Widok dla zalogowanych (Dashboard)
+                register_user(email, password)
     else:
+        # PANEL GŁÓWNY
         user_id = st.session_state['user'].id
         
         with st.sidebar:
@@ -113,82 +111,97 @@ def main():
             if st.button("Wyloguj"):
                 logout_user()
 
-        # GŁÓWNE ZAKŁADKI
-        tab_add, tab_list, tab_campaign = st.tabs(["➕ Dodaj", "📋 Lista", "🚀 Kampania SMS (AI)"])
+        tab_add, tab_list, tab_ai = st.tabs(["➕ Dodaj / Import", "📋 Lista Klientek", "🤖 Kampania AI"])
 
-        # --- ZAKŁADKA 1: DODAWANIE ---
+        # --- ZAKŁADKA 1: DODAWANIE RĘCZNE I IMPORT ---
         with tab_add:
-            with st.form("add_client_form"):
+            st.subheader("1. Dodawanie ręczne")
+            with st.form("add_manual"):
                 c1, c2 = st.columns(2)
                 with c1:
                     imie = st.text_input("Imię i Nazwisko")
-                    telefon = st.text_input("Telefon")
+                    tel = st.text_input("Telefon")
                 with c2:
-                    zabieg = st.text_input("Zabieg")
-                    data_wizyty = st.date_input("Data", value=date.today())
+                    zabieg = st.text_input("Ostatni zabieg")
+                    data = st.date_input("Data wizyty", value=date.today())
                 
-                if st.form_submit_button("Zapisz"):
-                    if imie:
-                        ok, msg = add_client(user_id, imie, telefon, zabieg, data_wizyty)
-                        if ok:
-                            st.success(msg)
-                            time.sleep(1)
-                            st.rerun()
-                        else:
-                            st.error(msg)
+                if st.form_submit_button("Zapisz ręcznie"):
+                    ok, msg = add_client(user_id, imie, tel, zabieg, data)
+                    if ok:
+                        st.success("Dodano!")
+                        time.sleep(1)
+                        st.rerun()
                     else:
-                        st.warning("Imię jest wymagane!")
+                        st.error(f"Błąd: {msg}")
 
-        # --- ZAKŁADKA 2: LISTA KLIENTÓW ---
+            st.write("---")
+            st.subheader("2. 📥 Import z pliku (VCF)")
+            uploaded_file = st.file_uploader("Wgraj plik .vcf z kontaktami", type=['vcf'])
+            
+            if uploaded_file is not None:
+                # Używamy funkcji z utils.py
+                df_contacts = parse_vcf(uploaded_file.read())
+                
+                st.write(f"Znaleziono {len(df_contacts)} kontaktów.")
+                st.dataframe(df_contacts.head())
+
+                if st.button("💾 Zapisz te kontakty do bazy"):
+                    progress = st.progress(0)
+                    success_count = 0
+                    
+                    for index, row in df_contacts.iterrows():
+                        ok, _ = add_client(
+                            user_id, 
+                            row['Imię'], 
+                            row['Telefon'], 
+                            row.get('Ostatni Zabieg', 'Import'), 
+                            date.today()
+                        )
+                        if ok: success_count += 1
+                        time.sleep(0.1) # Lekkie opóźnienie dla stabilności
+                        progress.progress((index + 1) / len(df_contacts))
+                    
+                    st.success(f"Pomyślnie zaimportowano: {success_count} klientek!")
+                    time.sleep(2)
+                    st.rerun()
+
+        # --- ZAKŁADKA 2: LISTA ---
         with tab_list:
             clients = get_clients(user_id)
             if clients:
-                st.write(f"Baza klientek: {len(clients)}")
-                for client in clients:
-                    with st.expander(f"{client.get('imie')} - {client.get('ostatni_zabieg')}"):
-                        st.write(f"Tel: {client.get('telefon')}")
-                        if st.button("Usuń", key=f"del_{client['id']}"):
-                            delete_client(client['id'])
+                st.write(f"Twoja baza: {len(clients)} osób")
+                for c in clients:
+                    with st.expander(f"{c['imie']} ({c['telefon']})"):
+                        st.write(f"Zabieg: {c['ostatni_zabieg']}")
+                        if st.button("Usuń", key=f"del_{c['id']}"):
+                            delete_client(c['id'])
                             st.rerun()
             else:
-                st.info("Brak klientek.")
+                st.info("Baza jest pusta. Dodaj kogoś lub zaimportuj plik!")
 
-        # --- ZAKŁADKA 3: KAMPANIA AI (To tutaj był błąd wcięcia) ---
-        with tab_campaign:
-            st.subheader("Generator wiadomości SMS")
+        # --- ZAKŁADKA 3: AI ---
+        with tab_ai:
+            st.header("Generator Kampanii SMS")
             clients = get_clients(user_id)
             
             if not clients:
-                st.warning("Najpierw dodaj klientki w zakładce 'Lista'!")
+                st.warning("Najpierw dodaj klientki!")
             else:
-                # Pola konfiguracji kampanii
-                cel_kampanii = st.text_input("Cel kampanii (np. promocja -15% na święta)", value="promocja -15% do końca tygodnia")
+                cel = st.text_input("Co promujemy?", value="Promocja -20% na hasło ZIMA")
                 
-                # Przycisk generowania
-                if st.button("🚀 Generuj propozycje SMS"):
-                    st.write("---")
-                    progress_bar = st.progress(0)
-                    
-                    # Konwersja listy słowników na DataFrame dla łatwiejszej obsługi
+                if st.button("🚀 Generuj wiadomości"):
+                    bar = st.progress(0)
                     df = pd.DataFrame(clients)
                     
-                    for index, row in df.iterrows():
-                        imie = row.get('imie', 'Klientka')
-                        zabieg = row.get('ostatni_zabieg', 'wizyta')
-                        salon = "Twój Salon" # Możesz tu wpisać nazwę na sztywno lub pobrać z ustawień
-
-                        # Generowanie przez AI (z pliku utils.py)
-                        wiadomosc = generate_single_message(salon, cel_kampanii, imie, zabieg)
+                    for i, row in df.iterrows():
+                        # Używamy funkcji z utils.py
+                        msg = generate_single_message("Twój Salon", cel, row['imie'], row['ostatni_zabieg'])
                         
-                        # Wyświetlanie wyniku
-                        st.markdown(f"**Do:** {imie}")
-                        st.info(wiadomosc)
+                        st.markdown(f"**Do: {row['imie']}**")
+                        st.info(msg)
                         
-                        # Ważne opóźnienie dla API
-                        time.sleep(1.5)
-                        progress_bar.progress((index + 1) / len(df))
-                    
-                    st.success("Gotowe! Możesz kopiować wiadomości.")
+                        time.sleep(1.5) # Ważne dla limitów API Google
+                        bar.progress((i + 1) / len(df))
 
 if __name__ == "__main__":
     main()
