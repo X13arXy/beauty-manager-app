@@ -4,13 +4,16 @@ import pandas as pd
 import time
 import random
 
-# --- KONFIGURACJA AI ---
+# --- KONFIGURACJA AI (PODKRĘCONA KREATYWNOŚĆ) ---
 def init_ai():
     try:
         genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
-        # Ustawiamy wyższą "temperaturę" (0.85), żeby AI było bardziej kreatywne i mniej "robotyczne"
+        
+        # USTAWIAMY TEMPERATURĘ NA 0.9 (Bardzo wysoka kreatywność)
+        # Dzięki temu AI będzie rzadziej powtarzać te same zwroty
         config = genai.types.GenerationConfig(
-            temperature=0.85,
+            temperature=0.9,
+            top_p=0.95,
             candidate_count=1
         )
         return genai.GenerativeModel('models/gemini-1.5-flash', generation_config=config)
@@ -22,64 +25,68 @@ model = init_ai()
 
 # --- NARZĘDZIA TECHNICZNE ---
 def usun_ogonki(tekst):
-    """Zamienia polskie znaki na łacińskie"""
     mapa = {'ą': 'a', 'ć': 'c', 'ę': 'e', 'ł': 'l', 'ń': 'n', 'ó': 'o', 'ś': 's', 'ź': 'z', 'ż': 'z',
             'Ą': 'A', 'Ć': 'C', 'Ę': 'E', 'Ł': 'L', 'Ń': 'N', 'Ó': 'O', 'Ś': 'S', 'Ź': 'Z', 'Ż': 'Z'}
     for pl, latin in mapa.items():
         tekst = tekst.replace(pl, latin)
     return tekst
 
+def process_message(raw_text):
+    clean_text = usun_ogonki(raw_text)
+    if len(clean_text) > 160:
+        return clean_text[:157] + "..."
+    return clean_text
+
 def generate_single_message(salon_name, campaign_goal, client_name, last_treatment):
-    """Generuje UNIKALNĄ, ciepłą wiadomość."""
+    """Generuje wiadomość z DUŻĄ energią i różnorodnością"""
     
-    # 1. Losujemy "Vibe" wiadomości, żeby każda była inna
+    # --- LOSOWANIE OSOBOWOŚCI (To jest klucz do różnorodności) ---
     vibe_list = [
-        "Entuzjastyczna i pełna energii (użyj wykrzyknika i ognia)",
-        "Ciepła, troskliwa i spokojna (jak dobra przyjaciółka)",
-        "Tajemnicza i intrygująca (zadaj pytanie)",
-        "Krótka, konkretna, ale bardzo miła"
+        "ZWARIOWANA PRZYJACIÓŁKA: Dużo energii, wykrzykniki, emocje! Pisz tak, jakbyś nie widziała jej sto lat.",
+        "TROSKLIWA OPIEKUNKA: Skup się na relaksie, odpoczynku, 'chwili dla siebie'. Ciepło i spokój.",
+        "EKSPERTKA BEAUTY: Skup się na efekcie 'wow', blasku, byciu gwiazdą. Komplementuj.",
+        "KRÓTKO I NA TEMAT (ALE MIŁO): Konkret, ale z uśmiechem. Bez zbędnego lania wody.",
+        "TAJEMNICZA: Zacznij od pytania, zrób aurę ekskluzywności."
     ]
+    # Losujemy jeden styl dla tej konkretnej klientki
     current_vibe = random.choice(vibe_list)
 
-    # 2. Prompt nastawiony na relację
+    # --- PROMPT "BESTIE" ---
     prompt = f"""
-    Jesteś właścicielką salonu "{salon_name}". Piszesz prywatnego SMS-a do swojej stałej klientki.
+    Jesteś właścicielką salonu "{salon_name}". Piszesz prywatnego SMS-a do klientki: {client_name}.
+    Ostatnio robiła: {last_treatment}.
     
-    KLIENTKA: {client_name}
-    BYŁA OSTATNIO NA: {last_treatment}
-    CEL WIADOMOŚCI: {campaign_goal}
+    CEL: {campaign_goal}.
     
-    TWÓJ STYL W TEJ WIADOMOŚCI: {current_vibe}.
+    TWOJA ROLA W TYM SMSIE: {current_vibe} (Trzymaj się tego stylu!).
     
-    ZASADY (BEZWZGLĘDNE):
-    1. Zacznij od imienia w WOŁACZU (np. "Hej Aniu!", "Cześć Kasiu").
-    2. Pisz LUŹNO. Unikaj słów typu "zapraszamy do skorzystania", "oferujemy". Zamiast tego pisz: "wpadnij", "mamy coś ekstra".
-    3. Jeśli to pasuje, nawiąż do ostatniego zabiegu (np. "jak się trzymają paznokcie?").
-    4. Dodaj 1-2 emoji pasujące do stylu.
-    5. Podpisz się tylko nazwą salonu.
-    6. Pisz poprawną polszczyzną (ogonki usuniemy sami).
-    7. Max 160 znaków.
+    BARDZO WAŻNE ZASADY (PRZESTRZEGAJ ICH):
+    1. ZABRONIONE: Nie używaj słów "zapraszamy", "skorzystaj", "oferujemy", "usługi". To brzmi jak bot!
+    2. ZAMIAST TEGO: Pisz "wpadaj", "mam dla Ciebie", "zróbmy coś fajnego", "tęsknimy".
+    3. Zacznij od imienia w WOŁACZU (np. "Hejka Aniu!", "Cześć Kasiu!").
+    4. Dodaj 2-3 emoji pasujące do wylosowanego stylu.
+    5. Jeśli to pasuje, nawiąż luźno do ostatniego zabiegu (np. "jak tam pazurki?", "czas na relaks?").
+    6. Podpisz się tylko nazwą salonu.
+    7. Pisz poprawną polszczyzną (bez 'ogonków' zajmiemy się później).
+    8. Max 160 znaków.
     """
     
-    # Wyłączenie filtrów bezpieczeństwa
     safety = [{"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"}]
 
     try:
-        # Próbujemy 3 razy (Retry Logic)
+        # Próbujemy 3 razy
         for attempt in range(3):
             try:
                 res = model.generate_content(prompt, safety_settings=safety)
                 raw_text = res.text.strip()
-                # Czyścimy technicznie
-                return usun_ogonki(raw_text)
-            except Exception as e:
-                # Jeśli błąd limitów (429), czekamy dłużej
-                time.sleep(2 + attempt) 
+                return process_message(raw_text)
+            except:
+                time.sleep(1) # Krótka przerwa
         
-        # Fallback (Gdyby AI padło 3 razy)
-        return usun_ogonki(f"Czesc {client_name}! {campaign_goal}. Sciskamy, {salon_name}") 
+        # Fallback
+        return usun_ogonki(f"Czesc {client_name}! {campaign_goal}. Czekamy na Ciebie w {salon_name}!") 
     except:
-        return usun_ogonki(f"Czesc {client_name}! {campaign_goal}. Sciskamy, {salon_name}")
+        return usun_ogonki(f"Czesc {client_name}! {campaign_goal}. Czekamy na Ciebie w {salon_name}!")
 
 # --- IMPORT (BEZ ZMIAN) ---
 def parse_vcf(file_content):
