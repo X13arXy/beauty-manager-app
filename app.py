@@ -22,9 +22,11 @@ if 'preview_client' not in st.session_state: st.session_state['preview_client'] 
 if 'campaign_goal' not in st.session_state: st.session_state['campaign_goal'] = ""
 if 'salon_name' not in st.session_state: st.session_state['salon_name'] = ""
 
-# Zmienne do obsługi tabeli SMS (Wersjonowanie naprawia błędy odświeżania)
-if 'sms_data' not in st.session_state: st.session_state['sms_data'] = None
-if 'sms_version' not in st.session_state: st.session_state['sms_version'] = 0
+# Zmienne do obsługi przycisków masowego zaznaczania
+# Wersja klucza pozwala nam "zresetować" tabelę tylko wtedy, gdy klikniemy przycisk
+if 'sms_table_key_version' not in st.session_state: st.session_state['sms_table_key_version'] = 0
+# Domyślna wartość zaznaczenia (False = odznaczeni, True = zaznaczeni)
+if 'sms_default_check' not in st.session_state: st.session_state['sms_default_check'] = False
 
 # ========================================================
 # 1. EKRAN LOGOWANIA I REJESTRACJI
@@ -116,7 +118,6 @@ with st.sidebar:
         db.logout_user()
         st.session_state['user'] = None
         st.session_state['salon_name'] = ""
-        st.session_state['sms_data'] = None # Czyścimy cache
         st.rerun()
     st.divider()
 
@@ -188,7 +189,6 @@ if page == "📂 Baza Klientek":
                             
                             if added > 0:
                                 st.success(f"✅ Pomyślnie dodano {added} kontaktów!")
-                                st.session_state['sms_data'] = None # Reset tabeli SMS po imporcie
                             
                             if errors:
                                 st.error(f"⚠️ Błędy przy {len(errors)} osobach:")
@@ -240,17 +240,17 @@ if page == "📂 Baza Klientek":
                     
                     for row in raw_data:
                         row['salon_id'] = SALON_ID
+                        # Czyścimy ID (dla nowych wierszy)
                         id_val = row.get('id')
-                        # Czyścimy ID żeby baza nadała nowe, jeśli puste
                         if not id_val or pd.isna(id_val):
                             if 'id' in row: del row['id']
                         cleaned_data.append(row)
                     
+                    # Logika zapisu z RLS
                     success, msg = db.update_clients_bulk(cleaned_data)
                     
                     if success:
                         st.success(f"✅ Zapisano pomyślnie!")
-                        st.session_state['sms_data'] = None # Reset tabeli SMS po edycji
                         time.sleep(1)
                         st.rerun()
                     else:
@@ -270,7 +270,6 @@ if page == "📂 Baza Klientek":
                 to_del = st.selectbox("Wybierz osobę do usunięcia:", options=opts.keys(), format_func=lambda x: opts[x])
                 if st.button("Usuń wybraną trwale"):
                     db.delete_client(to_del, SALON_ID)
-                    st.session_state['sms_data'] = None
                     st.rerun()
             else:
                 st.write("Brak zapisanych klientek do usunięcia.")
@@ -283,7 +282,7 @@ if page == "📂 Baza Klientek":
 elif page == "🤖 Automat SMS":
     st.header("Generator SMS AI")
     
-    # 1. Pobieramy świeże dane
+    # 1. Pobieramy dane
     clients_from_db = db.get_clients(SALON_ID)
     
     if clients_from_db.empty:
@@ -309,32 +308,35 @@ elif page == "🤖 Automat SMS":
         st.write("---")
         st.subheader("3. Wybierz Odbiorców")
         
-        # Inicjalizacja danych w sesji (jeśli puste lub zmieniła się liczba klientów w bazie)
-        if st.session_state['sms_data'] is None or len(st.session_state['sms_data']) != len(clients_from_db):
-             temp_df = clients_from_db.copy()
-             temp_df.insert(0, "Wybierz", False)
-             st.session_state['sms_data'] = temp_df
+        # LOGIKA DZIAŁANIA JAK W EDYCJA BAZY:
+        # 1. Przygotowujemy dane (zawsze świeże z bazy)
+        selection_df = clients_from_db.copy()
+        
+        # 2. Dodajemy kolumnę "Wybierz" z domyślną wartością (zależną od przycisków)
+        selection_df.insert(0, "Wybierz", st.session_state['sms_default_check'])
 
-        # Przyciski sterujące
+        # 3. Przyciski masowe
         col_all, col_none, col_space = st.columns([1, 1, 3])
         
-        # Te przyciski tylko zmieniają stan w sesji i odświeżają stronę (rerun)
+        # Kliknięcie przycisku zmienia TYLKO domyślny stan i wymusza odświeżenie tabeli nowym kluczem
         if col_all.button("✅ Zaznacz wszystkich"):
-             st.session_state['sms_data']['Wybierz'] = True
-             st.session_state['sms_version'] += 1 # Zmiana wersji wymusza przerysowanie tabeli
+             st.session_state['sms_default_check'] = True
+             st.session_state['sms_table_key_version'] += 1 
              st.rerun()
 
         if col_none.button("❌ Odznacz wszystkich"):
-             st.session_state['sms_data']['Wybierz'] = False
-             st.session_state['sms_version'] += 1
+             st.session_state['sms_default_check'] = False
+             st.session_state['sms_table_key_version'] += 1
              st.rerun()
 
-        # Wyświetlanie tabeli - Klucz jest dynamiczny (zawiera wersję), co naprawia błędy odświeżania
-        table_key = f"sms_table_v{st.session_state['sms_version']}"
-        
+        # 4. Tabela
+        # Klucz dynamiczny (key) zmienia się TYLKO po kliknięciu przycisków masowych.
+        # Podczas normalnego klikania klucz jest stały, więc Streamlit pamięta zaznaczenia i działa płynnie.
+        current_key = f"sms_selector_v{st.session_state['sms_table_key_version']}"
+
         edited_selection = st.data_editor(
-            st.session_state['sms_data'],
-            key=table_key,
+            selection_df,
+            key=current_key, 
             height=400,
             use_container_width=True,
             hide_index=True,
@@ -343,13 +345,12 @@ elif page == "🤖 Automat SMS":
                 "imie": st.column_config.TextColumn("Klientka", disabled=True),
                 "telefon": st.column_config.TextColumn("Telefon", disabled=True),
                 "ostatni_zabieg": st.column_config.TextColumn("Ostatni Zabieg", disabled=True),
+                # Ukrywamy techniczne
                 "id": None, "salon_id": None, "user_id": None, "created_at": None, "data_wizyty": None
             }
         )
-        
-        # Zapisujemy ręczne zmiany (pojedyncze kliknięcia) z powrotem do sesji
-        st.session_state['sms_data'] = edited_selection
 
+        # 5. Wynik
         target_df = edited_selection[edited_selection["Wybierz"] == True]
 
         if not target_df.empty:
