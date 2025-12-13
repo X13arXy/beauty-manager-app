@@ -69,3 +69,12 @@ def delete_client(client_id, salon_id):
         return True
     except:
         return False
+def reset_password_email(email):
+    try:
+        # To wyśle maila z linkiem do zmiany hasła (obsługiwane przez Supabase)
+        supabase.auth.reset_password_for_email(email, {
+            "redirect_to": "http://localhost:8501" # Tutaj w przyszłości dasz adres swojej apki w chmurze
+        })
+        return True, "Link wysłany! Sprawdź email."
+    except Exception as e:
+        return False, str(e)
