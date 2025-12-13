@@ -209,54 +209,43 @@ if page == "📂 Baza Klientek":
             st.rerun()
     else:
         # --- ZAKŁADKA: AUTOMAT SMS ---
-        elif page == "🤖 Automat SMS":
+elif page == "🤖 Automat SMS":
     st.header("Generator SMS AI")
     
-    # 1. NAJPIERW pobieramy dane z bazy (żeby mieć na czym pracować)
+    # 1. Pobieramy dane
     df = db.get_clients(SALON_ID)
     
     if df.empty:
         st.warning("Najpierw dodaj klientki w bazie (zakładka Baza Klientek)!")
     else:
-        # 2. Konfiguracja (Salon + Cel)
+        # 2. Konfiguracja
         c1, c2 = st.columns(2)
         
-        # --- LOGIKA: Nazwa salonu z auto-zapisem ---
+        # Nazwa salonu z auto-zapisem
         current_name = st.session_state.get('salon_name', "")
-        
-        # Jeśli w sesji pusto, próbujemy pobrać z bazy
         if not current_name:
             current_name = db.get_salon_name(SALON_ID)
             st.session_state['salon_name'] = current_name
 
         salon_name = c1.text_input("Nazwa salonu (Podpis SMS):", value=current_name)
         
-        # Zapis do bazy przy zmianie
         if salon_name != current_name:
             db.update_salon_name(SALON_ID, salon_name)
             st.session_state['salon_name'] = salon_name
             st.toast("✅ Zapisano nową nazwę salonu!")
-        # -------------------------------------------
         
-        campaign_goal = c2.text_input("Cel Kampanii (np. promocja na hybrydę):", value=st.session_state['campaign_goal'])
+        campaign_goal = c2.text_input("Cel Kampanii:", value=st.session_state['campaign_goal'])
         st.session_state['campaign_goal'] = campaign_goal
 
-        # 3. Wybór Odbiorców (To musi być PRZED sprawdzeniem if target_df!)
+        # 3. Wybór Odbiorców
         st.write("---")
         wybrane = st.multiselect("Odbiorcy:", df['imie'].tolist(), default=df['imie'].tolist())
-        
-        # --- TU DEFINIUJEMY target_df (naprawa błędu NameError) ---
         target_df = df[df['imie'].isin(wybrane)]
-        # ----------------------------------------------------------
 
-        # 4. Generowanie Treści
-        # Teraz target_df już istnieje, więc Python nie zgłosi błędu
+        # 4. Generowanie (Podgląd)
         if salon_name and not target_df.empty:
             if st.button("🔍 Generuj Treść (Podgląd)", type="secondary"):
-                # Pobieramy przykładowy wiersz
                 sample_row = target_df.iloc[0] 
-                
-                # Generujemy treść (przekazujemy wiersz, nie sam string)
                 content = srv.generate_sms_content(salon_name, sample_row, campaign_goal)
                 
                 if content:
@@ -268,7 +257,7 @@ if page == "📂 Baza Klientek":
         if st.session_state['sms_preview']:
             st.divider()
             st.subheader("Podgląd SMS (dla pierwszej osoby):")
-            st.info(f"Odbiorca przykładowy: {st.session_state['preview_client']}")
+            st.info(f"Przykładowy odbiorca: {st.session_state['preview_client']}")
             st.code(st.session_state['sms_preview'], language='text')
             
             col_opt, col_btn = st.columns([2, 1])
@@ -278,8 +267,6 @@ if page == "📂 Baza Klientek":
             if col_btn.button("🚀 WYŚLIJ KAMPANIĘ", type="primary"):
                 progress_bar = st.progress(0.0)
                 
-                # Wywołanie logiki wysyłki z services.py
-                # Funkcja zwraca teraz tabelę (DataFrame) z wynikami
                 raport_df = srv.send_campaign_logic(
                     target_df, 
                     st.session_state['campaign_goal'],
@@ -293,12 +280,10 @@ if page == "📂 Baza Klientek":
                 st.balloons()
                 st.success("Proces zakończony!")
                 
-                # --- RAPORT ---
                 st.divider()
                 st.subheader("📊 Raport z wysyłki")
                 st.dataframe(raport_df, use_container_width=True)
                 
-                # Przycisk pobierania CSV
                 csv = raport_df.to_csv(index=False).encode('utf-8')
                 st.download_button(
                     label="📥 Pobierz raport (CSV)",
@@ -309,6 +294,7 @@ if page == "📂 Baza Klientek":
 
                 st.session_state['sms_preview'] = None
        
+
 
 
 
