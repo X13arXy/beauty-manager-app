@@ -125,11 +125,13 @@ if page == "📂 Baza Klientek":
     st.header("Twoja Baza")
 
     # --- 1. IMPORT DANYCH ---
+# --- 1. IMPORT DANYCH ---
     with st.expander("📥 IMPORT (VCF/Excel)", expanded=False):
         uploaded_file = st.file_uploader("Wgraj plik", type=['xlsx', 'csv', 'vcf'])
         
         if uploaded_file:
             df_import = None
+            # Parsowanie plików w zależności od rozszerzenia
             if uploaded_file.name.endswith('.vcf'):
                 df_import = srv.parse_vcf(uploaded_file.getvalue())
             elif uploaded_file.name.endswith('.csv'):
@@ -138,35 +140,68 @@ if page == "📂 Baza Klientek":
                 df_import = pd.read_excel(uploaded_file)
             
             if df_import is not None and not df_import.empty:
+                # Normalizacja nazw kolumn
                 df_import.columns = [c.lower() for c in df_import.columns]
+                
+                # Szukanie kolumn imię i telefon
                 col_imie = next((c for c in df_import.columns if 'imi' in c or 'name' in c), None)
                 col_tel = next((c for c in df_import.columns if 'tel' in c or 'num' in c), None)
 
                 if col_imie and col_tel:
+                    # Tworzenie tabeli do podglądu
                     df_to_show = pd.DataFrame({
                         "Dodaj": True, 
                         "Imię": df_import[col_imie],
                         "Telefon": df_import[col_tel],
                         "Zabieg": "Nieznany"
                     })
+                    
                     st.write("Edytuj listę przed importem:")
+                    # Tu tworzymy zmienną edited_df - musi być w tym miejscu!
                     edited_df = st.data_editor(df_to_show, hide_index=True, use_container_width=True)
                     
+                    # --- PRZYCISK ZAPISU (Musi być wcięty tak samo jak st.data_editor) ---
                     if st.button(f"💾 Zapisz zaznaczone"):
+                        # Teraz Python widzi edited_df, bo jesteśmy w dobrym wcięciu
                         to_import = edited_df[edited_df["Dodaj"] == True]
+                        
                         if to_import.empty:
                             st.warning("Nie zaznaczono nikogo do importu.")
                         else:
                             prog_bar = st.progress(0)
                             count = len(to_import)
                             added = 0
+                            errors = []
+                            
                             for idx, row in to_import.iterrows():
-                                db.add_client(SALON_ID, str(row["Imię"]), str(row["Telefon"]), str(row["Zabieg"]), None)
-                                added += 1
+                                # Próba zapisu do bazy
+                                success, msg = db.add_client(
+                                    SALON_ID, 
+                                    str(row["Imię"]), 
+                                    str(row["Telefon"]), 
+                                    str(row["Zabieg"]), 
+                                    None
+                                )
+                                
+                                if success:
+                                    added += 1
+                                else:
+                                    errors.append(f"{row['Imię']}: {msg}")
+                                
                                 prog_bar.progress((idx + 1) / count)
-                            st.success(f"Dodano {added} kontaktów!")
-                            time.sleep(1.5)
-                            st.rerun()
+                            
+                            # Raport końcowy
+                            if added > 0:
+                                st.success(f"✅ Pomyślnie dodano {added} kontaktów!")
+                            
+                            if errors:
+                                st.error(f"⚠️ Błędy przy {len(errors)} osobach:")
+                                for err in errors:
+                                    st.text(f"- {err}")
+                            
+                            if added > 0:
+                                time.sleep(2)
+                                st.rerun()
                 else:
                     st.error("Nie rozpoznano kolumn Imię/Telefon w pliku.")
 
@@ -381,6 +416,7 @@ elif page == "🤖 Automat SMS":
                     mime='text/csv',
                 )
                 st.session_state['sms_preview'] = None
+
 
 
 
