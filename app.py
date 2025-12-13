@@ -40,6 +40,8 @@ if not st.session_state['user']:
                 user = db.login_user(l_email, l_pass)
                 if user:
                     st.session_state['user'] = user
+                    saved_name = db.get_salon_name(user.id)
+                    st.session_state['salon_name'] = saved_name
                     st.success("✅ Zalogowano!")
                     st.rerun()
         
@@ -279,6 +281,7 @@ elif page == "🤖 Automat SMS":
                 )
 
                 st.session_state['sms_preview'] = None
+
 
 
 
