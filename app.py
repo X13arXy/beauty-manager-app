@@ -210,23 +210,22 @@ if page == "📂 Baza Klientek":
     else:
         st.info("Baza pusta.")
 # --- ZAKŁADKA: AUTOMAT SMS ---
-elif page == "🤖 Automat SMS":
-    st.header("Generator SMS AI")
-    df = db.get_clients(SALON_ID)
-    
-    if df.empty:
-        st.warning("Najpierw dodaj klientki w bazie!")
-    else:
-        # 1. Konfiguracja
+# 1. Konfiguracja
         c1, c2 = st.columns(2)
-        salon_name = c1.text_input("Nazwa salonu:", value=st.session_state['salon_name'])
-        st.session_state['salon_name'] = salon_name
+        
+        # --- ZMIANA: Pole nazwy salonu z auto-zapisem ---
+        current_name = st.session_state.get('salon_name', "")
+        salon_name = c1.text_input("Nazwa salonu (Podpis SMS):", value=current_name)
+        
+        # Jeśli użytkownik zmienił nazwę w polu, zapisz ją od razu do bazy i sesji
+        if salon_name != current_name:
+            db.update_salon_name(SALON_ID, salon_name)
+            st.session_state['salon_name'] = salon_name
+            st.toast("✅ Zapisano nową nazwę salonu!")
+        # -----------------------------------------------
         
         campaign_goal = c2.text_input("Cel Kampanii (np. promocja na hybrydę):", value=st.session_state['campaign_goal'])
         st.session_state['campaign_goal'] = campaign_goal
-
-        wybrane = st.multiselect("Odbiorcy:", df['imie'].tolist(), default=df['imie'].tolist())
-        target_df = df[df['imie'].isin(wybrane)]
 
         # 2. Generowanie
         if salon_name and not target_df.empty:
@@ -281,6 +280,7 @@ elif page == "🤖 Automat SMS":
                 )
 
                 st.session_state['sms_preview'] = None
+
 
 
 
