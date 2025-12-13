@@ -3,7 +3,9 @@ from supabase import create_client, Client
 import pandas as pd
 
 # --- INICJALIZACJA BAZY ---
+@st.cache_resource
 def init_supabase():
+    """Tworzy połączenie z Supabase i cache'uje je dla wydajności."""
     try:
         url = st.secrets["SUPABASE_URL"]
         key = st.secrets["SUPABASE_KEY"]
@@ -32,7 +34,6 @@ def register_user(email, password, salon_name):
         
         if user:
             # 2. Od razu tworzymy wpis w tabeli profiles
-            # Dzięki temu nazwa salonu jest zapisana od startu
             data = {
                 "id": user.id,
                 "nazwa_salonu": salon_name
@@ -43,17 +44,54 @@ def register_user(email, password, salon_name):
     except Exception as e:
         st.error(f"Błąd rejestracji: {e}")
         return None
+
 def logout_user():
     supabase.auth.sign_out()
 
-# --- OPERACJE NA DANYCH (CRUD) ---
+def reset_password_email(email):
+    try:
+        # To wyśle maila z linkiem do zmiany hasła
+        # redirect_to: adres Twojej aplikacji (localhost lub chmura)
+        supabase.auth.reset_password_for_email(email, {
+            "redirect_to": "http://localhost:8501" 
+        })
+        return True, "Link wysłany! Sprawdź email."
+    except Exception as e:
+        return False, str(e)
 
-# To jest ta poprawiona funkcja, o którą prosiłeś:
+# --- ZARZĄDZANIE PROFILEM ---
+
+def get_salon_name(user_id):
+    """Pobiera nazwę salonu dla zalogowanego użytkownika"""
+    try:
+        res = supabase.table("profiles").select("nazwa_salonu").eq("id", user_id).execute()
+        if res.data and len(res.data) > 0:
+            return res.data[0].get("nazwa_salonu", "")
+        else:
+            return ""
+    except Exception as e:
+        return ""
+
+def update_salon_name(user_id, new_name):
+    """Aktualizuje lub tworzy wpis z nazwą salonu"""
+    try:
+        data = {
+            "id": user_id,
+            "nazwa_salonu": new_name
+        }
+        supabase.table("profiles").upsert(data).execute()
+        return True
+    except Exception as e:
+        st.error(f"Błąd zapisu profilu: {e}")
+        return False
+
+# --- OPERACJE NA DANYCH KLIENTEK (CRUD) ---
+
 def add_client(salon_id, imie, telefon, zabieg, data):
     # Czyścimy numer telefonu z myślników i spacji
     clean_tel = ''.join(filter(str.isdigit, str(telefon)))
     
-    # Tu jest Twój FIX na daty (None zamiast pustego stringa)
+    # Fix na daty (None zamiast pustego stringa)
     data_val = str(data) if data and str(data).strip() != "" else None
     
     try:
@@ -81,57 +119,17 @@ def delete_client(client_id, salon_id):
         return True
     except:
         return False
-def reset_password_email(email):
-    try:
-        # To wyśle maila z linkiem do zmiany hasła (obsługiwane przez Supabase)
-        supabase.auth.reset_password_for_email(email, {
-            "redirect_to": "http://localhost:8501" # Tutaj w przyszłości dasz adres swojej apki w chmurze
-        })
-        return True, "Link wysłany! Sprawdź email."
-    except Exception as e:
-        return False, str(e)
-# --- ZARZĄDZANIE PROFILEM ---
 
-def get_salon_name(user_id):
-    """Pobiera nazwę salonu dla zalogowanego użytkownika"""
-    try:
-        # Pobieramy wiersz z tabeli profiles gdzie id = user_id
-        res = supabase.table("profiles").select("nazwa_salonu").eq("id", user_id).execute()
-        
-        # Jeśli coś znalazło, zwracamy nazwę
-        if res.data and len(res.data) > 0:
-            return res.data[0].get("nazwa_salonu", "")
-        else:
-            return ""
-    except Exception as e:
-        return ""
-
-def update_salon_name(user_id, new_name):
-    """Aktualizuje lub tworzy wpis z nazwą salonu"""
-    try:
-        # Używamy 'upsert' (update lub insert)
-        data = {
-            "id": user_id,
-            "nazwa_salonu": new_name
-        }
-        supabase.table("profiles").upsert(data).execute()
-        return True
-    except Exception as e:
-        st.error(f"Błąd zapisu profilu: {e}")
-        return False
 def update_clients_bulk(data_list):
     """
-    Przyjmuje listę słowników (zmienioną tabelę) i aktualizuje Supabase.
-    Wymaga, aby w danych było pole 'id' (klucz główny).
+    Przyjmuje listę słowników i aktualizuje Supabase.
+    Wymaga pola 'id' w każdym słowniku.
     """
     try:
         if not data_list:
             return True, "Brak danych do zapisu."
             
-        # upsert w Supabase aktualizuje wiersze, jeśli pasuje ID, 
-        # lub dodaje nowe, jeśli ID nie ma (lub jest nowe)
         supabase.table("klientki").upsert(data_list).execute()
         return True, "Zapisano pomyślnie!"
     except Exception as e:
         return False, str(e)
-
