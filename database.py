@@ -23,14 +23,26 @@ def login_user(email, password):
         st.error(f"Błąd logowania: {e}")
         return None
 
-def register_user(email, password):
+def register_user(email, password, salon_name):
+    """Rejestruje użytkownika i od razu tworzy profil z nazwą salonu"""
     try:
+        # 1. Tworzymy użytkownika w Auth
         response = supabase.auth.sign_up({"email": email, "password": password})
-        return response.user
+        user = response.user
+        
+        if user:
+            # 2. Od razu tworzymy wpis w tabeli profiles
+            # Dzięki temu nazwa salonu jest zapisana od startu
+            data = {
+                "id": user.id,
+                "nazwa_salonu": salon_name
+            }
+            supabase.table("profiles").insert(data).execute()
+            return user
+        return None
     except Exception as e:
         st.error(f"Błąd rejestracji: {e}")
         return None
-
 def logout_user():
     supabase.auth.sign_out()
 
