@@ -266,13 +266,16 @@ if page == "📂 Baza Klientek":
 elif page == "🤖 Automat SMS":
     st.header("Generator SMS AI")
     
+    # 1. Pobieramy dane
     df = db.get_clients(SALON_ID)
     
     if df.empty:
         st.warning("Najpierw dodaj klientki w bazie (zakładka Baza Klientek)!")
     else:
+        # 2. Konfiguracja Kampanii
         c1, c2 = st.columns(2)
         current_name = st.session_state.get('salon_name', "")
+        
         if not current_name:
             current_name = db.get_salon_name(SALON_ID)
             st.session_state['salon_name'] = current_name
@@ -287,10 +290,46 @@ elif page == "🤖 Automat SMS":
         campaign_goal = c2.text_input("Cel Kampanii:", value=st.session_state['campaign_goal'])
         st.session_state['campaign_goal'] = campaign_goal
 
+        # --- ZMIANA: TABELA ZAMIAST MULTISELECT ---
         st.write("---")
-        wybrane = st.multiselect("Odbiorcy:", df['imie'].tolist(), default=df['imie'].tolist())
-        target_df = df[df['imie'].isin(wybrane)]
+        st.subheader("3. Wybierz Odbiorców")
+        
+        # Tworzymy kopię danych do wyświetlenia i dodajemy kolumnę "Wybierz"
+        selection_df = df.copy()
+        selection_df.insert(0, "Wybierz", False) # Domyślnie odznaczone
 
+        # Wyświetlamy edytowalną tabelę
+        edited_selection = st.data_editor(
+            selection_df,
+            key="sms_selector_table",
+            height=400, # Wysokość tabeli
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Wybierz": st.column_config.CheckboxColumn("Wyślij?", default=False),
+                "imie": st.column_config.TextColumn("Klientka", disabled=True),
+                "telefon": st.column_config.TextColumn("Telefon", disabled=True),
+                "ostatni_zabieg": st.column_config.TextColumn("Ostatni Zabieg", disabled=True),
+                # Ukrywamy kolumny techniczne
+                "id": None,
+                "salon_id": None,
+                "user_id": None,
+                "created_at": None,
+                "data_wizyty": None
+            }
+        )
+
+        # Filtrujemy df, biorąc tylko te wiersze, gdzie "Wybierz" jest True
+        target_df = edited_selection[edited_selection["Wybierz"] == True]
+
+        # Licznik wybranych osób
+        if not target_df.empty:
+            st.info(f"✅ Wybrano odbiorców: **{len(target_df)}**")
+        else:
+            st.warning("⚠️ Nie wybrano nikogo. Zaznacz osoby w tabeli powyżej.")
+        # --- KONIEC ZMIANY ---
+
+        # 4. Generowanie (Podgląd) - RESZTA BEZ ZMIAN
         if salon_name and not target_df.empty:
             if st.button("🔍 Generuj Treść (Podgląd)", type="secondary"):
                 sample_row = target_df.iloc[0] 
@@ -334,4 +373,5 @@ elif page == "🤖 Automat SMS":
                     mime='text/csv',
                 )
                 st.session_state['sms_preview'] = None
+
 
