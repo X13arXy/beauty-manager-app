@@ -119,3 +119,19 @@ def update_salon_name(user_id, new_name):
     except Exception as e:
         st.error(f"Błąd zapisu profilu: {e}")
         return False
+def update_clients_bulk(data_list):
+    """
+    Przyjmuje listę słowników (zmienioną tabelę) i aktualizuje Supabase.
+    Wymaga, aby w danych było pole 'id' (klucz główny).
+    """
+    try:
+        if not data_list:
+            return True, "Brak danych do zapisu."
+            
+        # upsert w Supabase aktualizuje wiersze, jeśli pasuje ID, 
+        # lub dodaje nowe, jeśli ID nie ma (lub jest nowe)
+        supabase.table("klientki").upsert(data_list).execute()
+        return True, "Zapisano pomyślnie!"
+    except Exception as e:
+        return False, str(e)
+
