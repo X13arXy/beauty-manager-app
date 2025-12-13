@@ -51,7 +51,7 @@ if not st.session_state['user']:
             r_email = st.text_input("Email", key="r1")
             r_pass = st.text_input("Hasło", type="password", key="r2")
             
-            # NOWOŚĆ: Pytamy o nazwę salonu od razu
+            # Pytamy o nazwę salonu od razu
             r_salon = st.text_input("Nazwa Twojego Salonu", placeholder="np. Studio Basia")
             
             zgoda = st.checkbox("Akceptuję Regulamin i Politykę Prywatności *")
@@ -92,11 +92,9 @@ if not st.session_state['user']:
 # ========================================================
 CURRENT_USER = st.session_state['user']
 SALON_ID = CURRENT_USER.id 
-# ... (kod powyżej bez zmian: CURRENT_USER = ... SALON_ID = ...)
 
 with st.sidebar:
     # Wyświetlamy aktualną nazwę jako nagłówek
-    # Używamy .get() na wypadek gdyby sesja jeszcze nie miała tej zmiennej
     current_salon_name = st.session_state.get('salon_name', 'Twój Salon')
     st.header(f"🏠 {current_salon_name}")
     
@@ -105,36 +103,29 @@ with st.sidebar:
     
     # --- EDYCJA NAZWY W SIDEBARZE ---
     with st.expander("⚙️ Ustawienia Salonu"):
-        # Pobieramy obecną nazwę do pola edycji
         edit_name = st.text_input("Zmień nazwę:", value=current_salon_name)
         
         if st.button("Zapisz nową nazwę"):
             if edit_name:
-                # Aktualizacja w bazie
                 db.update_salon_name(SALON_ID, edit_name)
-                # Aktualizacja w sesji
                 st.session_state['salon_name'] = edit_name
                 st.success("Zmieniono!")
                 time.sleep(1)
                 st.rerun()
             else:
                 st.warning("Nazwa nie może być pusta.")
-    # ----------------------------------------
-
+    
     st.divider()
     
-    # TU BYŁ BŁĄD - Dodałem key="logout_btn", żeby Streamlit się nie mylił
     if st.button("Wyloguj", key="logout_btn"):
         db.logout_user()
         st.session_state['user'] = None
-        st.session_state['salon_name'] = "" # Czyścimy sesję
+        st.session_state['salon_name'] = ""
         st.rerun()
         
     st.divider()
 
-st.title("Panel Salonu")
-# ... (reszta kodu bez zmian)
-
+# --- POPRAWKA: Usunięto podwójne wywołanie st.title ---
 st.title("Panel Salonu")
 page = st.sidebar.radio("Menu", ["📂 Baza Klientek", "🤖 Automat SMS"])
 
@@ -201,43 +192,68 @@ if page == "📂 Baza Klientek":
                 else:
                     st.error("Nie rozpoznano kolumn Imię/Telefon w pliku.")
 
-    # --- 2. DODAWANIE RĘCZNE ---
-    with st.expander("➕ DODAJ RĘCZNIE (Pojedynczo)", expanded=False):
-        with st.form("manual_add_form"):
-            c1, c2 = st.columns(2)
-            f_imie = c1.text_input("Imię i Nazwisko")
-            f_tel = c2.text_input("Telefon")
-            
-            c3, c4 = st.columns(2)
-            f_zabieg = c3.text_input("Ostatni zabieg", value="Manicure")
-            f_data = c4.date_input("Data wizyty", value=None)
-            
-            submitted = st.form_submit_button("💾 Zapisz klientkę")
-            
-            if submitted:
-                if f_imie and f_tel:
-                    success, msg = db.add_client(SALON_ID, f_imie, f_tel, f_zabieg, f_data)
+    # --- 2. TABELA BAZY (NOWA - EDYTOWALNA) ---
+    st.divider()
+    st.subheader("Edycja Bazy")
+    
+    # Pobieramy klientów z bazy
+    df = db.get_clients(SALON_ID)
+    
+    if not df.empty:
+        # Konfigurujemy edytor
+        edited_database = st.data_editor(
+            df,
+            key="main_db_editor",
+            num_rows="dynamic", # Pozwala dodawać nowe wiersze na dole!
+            use_container_width=True,
+            column_config={
+                "id": None,          # Ukrywamy ID (nie chcemy go edytować ręcznie)
+                "salon_id": None,    # Ukrywamy ID salonu
+                "created_at": None,  # Ukrywamy datę utworzenia
+                "imie": st.column_config.TextColumn("Imię i Nazwisko", required=True),
+                "telefon": st.column_config.TextColumn("Telefon", required=True),
+                "ostatni_zabieg": "Ostatni Zabieg",
+                "data_wizyty": st.column_config.DateColumn("Data wizyty")
+            }
+        )
+
+        col_save, col_info = st.columns([1, 4])
+        
+        with col_save:
+            if st.button("💾 Zapisz zmiany w tabeli", type="primary"):
+                try:
+                    # 1. Uzupełniamy salon_id dla nowych wierszy (st.data_editor zostawia je puste/NaN)
+                    edited_database['salon_id'] = SALON_ID
+                    
+                    # 2. Zamieniamy na słownik i wysyłamy do bazy
+                    # orient='records' tworzy listę słowników: [{'imie': 'Anna', ...}, ...]
+                    data_to_upsert = edited_database.to_dict(orient='records')
+                    
+                    # 3. Wywołujemy funkcję z database.py
+                    success, msg = db.update_clients_bulk(data_to_upsert)
+                    
                     if success:
-                        st.success(f"✅ Dodano: {f_imie}")
+                        st.success(msg)
                         time.sleep(1)
                         st.rerun()
                     else:
-                        st.error(f"Błąd bazy: {msg}")
-                else:
-                    st.warning("⚠️ Imię i Telefon są wymagane!")
+                        st.error(f"Błąd zapisu: {msg}")
+                except Exception as e:
+                    st.error(f"Wystąpił błąd: {e}")
+                    
+        with col_info:
+            st.caption("ℹ️ Możesz edytować komórki bezpośrednio. Kliknij '+' na dole tabeli, aby dodać nowy wiersz.")
 
-    # --- 3. TABELA BAZY ---
-    df = db.get_clients(SALON_ID)
-    if not df.empty:
-        st.dataframe(df[['imie', 'telefon', 'ostatni_zabieg']], use_container_width=True)
-        
-        opts = df.set_index('id')['imie'].to_dict()
-        to_del = st.selectbox("Usuń klientkę:", options=opts.keys(), format_func=lambda x: opts[x])
-        if st.button("Usuń wybraną"):
-            db.delete_client(to_del, SALON_ID)
-            st.rerun()
+        # Opcjonalnie: Usuwanie (pozostawiłem osobno, bo jest bezpieczniejsze)
+        with st.expander("🗑️ Usuwanie klientek"):
+            opts = df.set_index('id')['imie'].to_dict()
+            if opts:
+                to_del = st.selectbox("Wybierz osobę do usunięcia:", options=opts.keys(), format_func=lambda x: opts[x])
+                if st.button("Usuń wybraną trwale"):
+                    db.delete_client(to_del, SALON_ID)
+                    st.rerun()
     else:
-        st.info("Baza pusta. Dodaj pierwsze klientki!")
+        st.info("Baza jest pusta. Użyj importu lub dodaj pierwszy wpis w tabeli (jeśli włączysz tryb dynamiczny) lub przez formularz.")
 
 # ========================================================
 # ZAKŁADKA: AUTOMAT SMS
@@ -254,22 +270,19 @@ elif page == "🤖 Automat SMS":
         # 2. Konfiguracja
         c1, c2 = st.columns(2)
         
-        # --- NAZWA SALONU (Pobrana z bazy, ale możliwa do edycji) ---
+        # --- NAZWA SALONU ---
         current_name = st.session_state.get('salon_name', "")
         
-        # Jeśli jakimś cudem pusto, dociągamy z bazy
         if not current_name:
             current_name = db.get_salon_name(SALON_ID)
             st.session_state['salon_name'] = current_name
 
         salon_name = c1.text_input("Nazwa salonu (Podpis SMS):", value=current_name)
         
-        # Jeśli użytkownik tu zmieni nazwę, aktualizujemy bazę
         if salon_name != current_name:
             db.update_salon_name(SALON_ID, salon_name)
             st.session_state['salon_name'] = salon_name
             st.toast("✅ Zaktualizowano nazwę salonu!")
-        # ------------------------------------------------------------
         
         campaign_goal = c2.text_input("Cel Kampanii:", value=st.session_state['campaign_goal'])
         st.session_state['campaign_goal'] = campaign_goal
