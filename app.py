@@ -182,15 +182,20 @@ if page == "📂 Baza Klientek":
         df = pd.DataFrame(columns=["id", "salon_id", "imie", "telefon", "ostatni_zabieg", "data_wizyty"])
 
     # 3. Konfigurujemy edytor
+    # 3. Konfigurujemy edytor
     edited_database = st.data_editor(
         df,
         key="main_db_editor",
         num_rows="dynamic",
         use_container_width=True,
         column_config={
-            "id": None,
-            "salon_id": None,
-            "created_at": None,
+            # --- UKRYWANIE KOLUMN TECHNICZNYCH ---
+            "id": None,           # Ukrywamy ID wiersza
+            "salon_id": None,     # Ukrywamy ID salonu (dla pewności)
+            "user_id": None,      # <--- TO DODAJEMY (Ukrywa kolumnę ze screena)
+            "created_at": None,   # Ukrywamy datę utworzenia
+            
+            # --- KONFIGURACJA KOLUMN WIDOCZNYCH ---
             "imie": st.column_config.TextColumn("Imię i Nazwisko", required=True, default="Nowa Klientka"),
             "telefon": st.column_config.TextColumn("Telefon", required=True, default="48"),
             "ostatni_zabieg": st.column_config.TextColumn("Ostatni Zabieg", default="Manicure"),
@@ -329,3 +334,4 @@ elif page == "🤖 Automat SMS":
                     mime='text/csv',
                 )
                 st.session_state['sms_preview'] = None
+
