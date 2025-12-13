@@ -23,7 +23,7 @@ if 'campaign_goal' not in st.session_state: st.session_state['campaign_goal'] = 
 if 'salon_name' not in st.session_state: st.session_state['salon_name'] = ""
 
 # ========================================================
-# 1. EKRAN LOGOWANIA
+# 1. EKRAN LOGOWANIA I REJESTRACJI
 # ========================================================
 
 if not st.session_state['user']:
@@ -40,31 +40,38 @@ if not st.session_state['user']:
                 user = db.login_user(l_email, l_pass)
                 if user:
                     st.session_state['user'] = user
+                    # Pobieramy nazwę salonu zapisaną przy rejestracji
                     saved_name = db.get_salon_name(user.id)
                     st.session_state['salon_name'] = saved_name
                     st.success("✅ Zalogowano!")
                     st.rerun()
         
-        # --- REJESTRACJA ---
+        # --- REJESTRACJA (Z NAZWĄ SALONU) ---
         with tab2:
             r_email = st.text_input("Email", key="r1")
             r_pass = st.text_input("Hasło", type="password", key="r2")
             
-            # MUST HAVE: Zgody prawne
+            # NOWOŚĆ: Pytamy o nazwę salonu od razu
+            r_salon = st.text_input("Nazwa Twojego Salonu", placeholder="np. Studio Basia")
+            
             zgoda = st.checkbox("Akceptuję Regulamin i Politykę Prywatności *")
             
             if st.button("Załóż konto"):
                 if not zgoda:
                     st.warning("Musisz zaakceptować regulamin!")
+                elif not r_salon:
+                    st.warning("Podaj nazwę salonu!")
                 else:
-                    user = db.register_user(r_email, r_pass)
+                    # Przekazujemy też nazwę salonu do funkcji
+                    user = db.register_user(r_email, r_pass, r_salon)
                     if user:
                         st.session_state['user'] = user
+                        st.session_state['salon_name'] = r_salon
                         st.success("✅ Konto utworzone! Sprawdź email w celu weryfikacji.")
                         time.sleep(2)
                         st.rerun()
 
-        # --- MUST HAVE: RESET HASŁA ---
+        # --- RESET HASŁA ---
         with tab3:
             st.write("Zapomniałeś hasła? Podaj email, wyślemy link.")
             reset_email = st.text_input("Twój Email", key="res1")
@@ -87,7 +94,10 @@ CURRENT_USER = st.session_state['user']
 SALON_ID = CURRENT_USER.id 
 
 with st.sidebar:
-    st.write(f"👤 **{CURRENT_USER.email}**")
+    # Wyświetlamy nazwę salonu w pasku bocznym
+    st.header(f"🏠 {st.session_state.get('salon_name', 'Twój Salon')}")
+    st.caption(f"Zalogowany: {CURRENT_USER.email}")
+    
     if st.button("Wyloguj"):
         db.logout_user()
         st.session_state['user'] = None
@@ -97,17 +107,18 @@ with st.sidebar:
 st.title("Panel Salonu")
 page = st.sidebar.radio("Menu", ["📂 Baza Klientek", "🤖 Automat SMS"])
 
-# --- ZAKŁADKA: BAZA KLIENTEK ---
+# ========================================================
+# ZAKŁADKA: BAZA KLIENTEK
+# ========================================================
 if page == "📂 Baza Klientek":
     st.header("Twoja Baza")
 
-    # Import
+    # --- 1. IMPORT DANYCH ---
     with st.expander("📥 IMPORT (VCF/Excel)", expanded=False):
         uploaded_file = st.file_uploader("Wgraj plik", type=['xlsx', 'csv', 'vcf'])
         
         if uploaded_file:
             df_import = None
-            # Rozpoznawanie pliku
             if uploaded_file.name.endswith('.vcf'):
                 df_import = srv.parse_vcf(uploaded_file.getvalue())
             elif uploaded_file.name.endswith('.csv'):
@@ -116,15 +127,12 @@ if page == "📂 Baza Klientek":
                 df_import = pd.read_excel(uploaded_file)
             
             if df_import is not None and not df_import.empty:
-                # Standaryzacja nazw kolumn
                 df_import.columns = [c.lower() for c in df_import.columns]
                 
-                # Szukanie odpowiednich kolumn
                 col_imie = next((c for c in df_import.columns if 'imi' in c or 'name' in c), None)
                 col_tel = next((c for c in df_import.columns if 'tel' in c or 'num' in c), None)
 
                 if col_imie and col_tel:
-                    # Przygotowanie tabeli do edycji
                     df_to_show = pd.DataFrame({
                         "Dodaj": True, 
                         "Imię": df_import[col_imie],
@@ -135,8 +143,6 @@ if page == "📂 Baza Klientek":
                     st.write("Edytuj listę przed importem:")
                     edited_df = st.data_editor(df_to_show, hide_index=True, use_container_width=True)
                     
-                    # --- TUTAJ BYŁ BŁĄD WCIĘCIA ---
-                    # Ten przycisk musi być równo z linią 'edited_df =' powyżej
                     if st.button(f"💾 Zapisz zaznaczone"):
                         to_import = edited_df[edited_df["Dodaj"] == True]
                         
@@ -148,7 +154,6 @@ if page == "📂 Baza Klientek":
                             added = 0
                             
                             for idx, row in to_import.iterrows():
-                                # Używamy poprawionej wersji z None zamiast ""
                                 db.add_client(
                                     SALON_ID, 
                                     str(row["Imię"]), 
@@ -164,7 +169,8 @@ if page == "📂 Baza Klientek":
                             st.rerun()
                 else:
                     st.error("Nie rozpoznano kolumn Imię/Telefon w pliku.")
-# --- NOWA SEKCJA: DODAWANIE RĘCZNE ---
+
+    # --- 2. DODAWANIE RĘCZNE ---
     with st.expander("➕ DODAJ RĘCZNIE (Pojedynczo)", expanded=False):
         with st.form("manual_add_form"):
             c1, c2 = st.columns(2)
@@ -179,36 +185,32 @@ if page == "📂 Baza Klientek":
             
             if submitted:
                 if f_imie and f_tel:
-                    # Wywołanie funkcji z database.py
-                    success, msg = db.add_client(
-                        SALON_ID, 
-                        f_imie, 
-                        f_tel, 
-                        f_zabieg, 
-                        f_data
-                    )
-                    
+                    success, msg = db.add_client(SALON_ID, f_imie, f_tel, f_zabieg, f_data)
                     if success:
                         st.success(f"✅ Dodano: {f_imie}")
                         time.sleep(1)
-                        st.rerun() # Odśwież stronę, żeby zobaczyć nową osobę w tabeli
+                        st.rerun()
                     else:
                         st.error(f"Błąd bazy: {msg}")
                 else:
                     st.warning("⚠️ Imię i Telefon są wymagane!")
 
-    # Tabela wyświetlania bazy (poza expanderem)
+    # --- 3. TABELA BAZY ---
     df = db.get_clients(SALON_ID)
     if not df.empty:
         st.dataframe(df[['imie', 'telefon', 'ostatni_zabieg']], use_container_width=True)
-        # Usuwanie
+        
         opts = df.set_index('id')['imie'].to_dict()
         to_del = st.selectbox("Usuń klientkę:", options=opts.keys(), format_func=lambda x: opts[x])
         if st.button("Usuń wybraną"):
             db.delete_client(to_del, SALON_ID)
             st.rerun()
     else:
-        # --- ZAKŁADKA: AUTOMAT SMS ---
+        st.info("Baza pusta. Dodaj pierwsze klientki!")
+
+# ========================================================
+# ZAKŁADKA: AUTOMAT SMS
+# ========================================================
 elif page == "🤖 Automat SMS":
     st.header("Generator SMS AI")
     
@@ -221,18 +223,22 @@ elif page == "🤖 Automat SMS":
         # 2. Konfiguracja
         c1, c2 = st.columns(2)
         
-        # Nazwa salonu z auto-zapisem
+        # --- NAZWA SALONU (Pobrana z bazy, ale możliwa do edycji) ---
         current_name = st.session_state.get('salon_name', "")
+        
+        # Jeśli jakimś cudem pusto, dociągamy z bazy
         if not current_name:
             current_name = db.get_salon_name(SALON_ID)
             st.session_state['salon_name'] = current_name
 
         salon_name = c1.text_input("Nazwa salonu (Podpis SMS):", value=current_name)
         
+        # Jeśli użytkownik tu zmieni nazwę, aktualizujemy bazę
         if salon_name != current_name:
             db.update_salon_name(SALON_ID, salon_name)
             st.session_state['salon_name'] = salon_name
-            st.toast("✅ Zapisano nową nazwę salonu!")
+            st.toast("✅ Zaktualizowano nazwę salonu!")
+        # ------------------------------------------------------------
         
         campaign_goal = c2.text_input("Cel Kampanii:", value=st.session_state['campaign_goal'])
         st.session_state['campaign_goal'] = campaign_goal
@@ -293,10 +299,3 @@ elif page == "🤖 Automat SMS":
                 )
 
                 st.session_state['sms_preview'] = None
-       
-
-
-
-
-
-
