@@ -158,7 +158,7 @@ if page == "📂 Baza Klientek":
                     # 2. PRZYCISK MUSI BYĆ NA TYM SAMYM POZIOMIE WCIĘCIA CO edited_df
                     if st.button(f"💾 Zapisz zaznaczone"):
                         
-                        # Teraz Python widzi edited_df, bo jesteśmy "wewnątrz" bloku, gdzie ona powstała
+                        # Teraz Python widzi edited_df, bo jesteśmy "wewnątrz" bloku
                         to_import = edited_df[edited_df["Dodaj"] == True]
                         
                         if to_import.empty:
@@ -198,8 +198,6 @@ if page == "📂 Baza Klientek":
                                 st.rerun()
                 else:
                     st.error("Nie rozpoznano kolumn Imię/Telefon w pliku.")
-                else:
-                    st.error("Nie rozpoznano kolumn Imię/Telefon w pliku.")
 
     # --- 2. TABELA BAZY (POPRAWIONA) ---
     st.divider()
@@ -213,20 +211,16 @@ if page == "📂 Baza Klientek":
         df = pd.DataFrame(columns=["id", "salon_id", "imie", "telefon", "ostatni_zabieg", "data_wizyty"])
 
     # 3. Konfigurujemy edytor
-    # 3. Konfigurujemy edytor
     edited_database = st.data_editor(
         df,
         key="main_db_editor",
         num_rows="dynamic",
         use_container_width=True,
         column_config={
-            # --- UKRYWANIE KOLUMN TECHNICZNYCH ---
-            "id": None,           # Ukrywamy ID wiersza
-            "salon_id": None,     # Ukrywamy ID salonu (dla pewności)
-            "user_id": None,      # <--- TO DODAJEMY (Ukrywa kolumnę ze screena)
-            "created_at": None,   # Ukrywamy datę utworzenia
-            
-            # --- KONFIGURACJA KOLUMN WIDOCZNYCH ---
+            "id": None,
+            "salon_id": None,
+            "user_id": None,      # Ukrywamy user_id
+            "created_at": None,
             "imie": st.column_config.TextColumn("Imię i Nazwisko", required=True, default="Nowa Klientka"),
             "telefon": st.column_config.TextColumn("Telefon", required=True, default="48"),
             "ostatni_zabieg": st.column_config.TextColumn("Ostatni Zabieg", default="Manicure"),
@@ -236,50 +230,39 @@ if page == "📂 Baza Klientek":
 
     col_save, col_info = st.columns([1, 4])
     
-    # --- TUTAJ BYŁ BŁĄD WCIĘCIA, TERAZ JEST OK ---
     with col_save:
-        if st.button(f"💾 Zapisz zaznaczone"):
-                        to_import = edited_df[edited_df["Dodaj"] == True]
+        if st.button("💾 Zapisz zmiany w tabeli", type="primary"):
+            try:
+                if edited_database.empty:
+                    st.warning("Tabela jest pusta.")
+                else:
+                    cleaned_data = []
+                    raw_data = edited_database.to_dict(orient='records')
+                    
+                    for row in raw_data:
+                        # a) Uzupełniamy salon_id
+                        row['salon_id'] = SALON_ID
                         
-                        if to_import.empty:
-                            st.warning("Nie zaznaczono nikogo do importu.")
-                        else:
-                            prog_bar = st.progress(0)
-                            count = len(to_import)
-                            added = 0
-                            errors = [] # Tu będziemy zbierać błędy
-                            
-                            for idx, row in to_import.iterrows():
-                                # Wywołujemy funkcję zapisu
-                                success, msg = db.add_client(
-                                    SALON_ID, 
-                                    str(row["Imię"]), 
-                                    str(row["Telefon"]), 
-                                    str(row["Zabieg"]), 
-                                    None
-                                )
-                                
-                                # SPRAWDZAMY CZY SIĘ UDAŁO
-                                if success:
-                                    added += 1
-                                else:
-                                    errors.append(f"{row['Imię']}: {msg}")
-                                
-                                prog_bar.progress((idx + 1) / count)
-                            
-                            # RAPORT KOŃCOWY
-                            if added > 0:
-                                st.success(f"✅ Pomyślnie dodano {added} kontaktów!")
-                            
-                            if errors:
-                                st.error(f"⚠️ Nie udało się dodać {len(errors)} osób. Oto powody:")
-                                for err in errors:
-                                    st.write(err)
-                            
-                            # Odświeżamy tylko jeśli coś się udało
-                            if added > 0:
-                                time.sleep(2)
-                                st.rerun()
+                        # b) USUWANIE ID dla nowych wierszy
+                        id_val = row.get('id')
+                        if not id_val or pd.isna(id_val):
+                            if 'id' in row:
+                                del row['id']
+                        
+                        cleaned_data.append(row)
+                    
+                    # c) Wysyłamy do bazy
+                    success, msg = db.update_clients_bulk(cleaned_data)
+                    
+                    if success:
+                        st.success(f"✅ Zapisano pomyślnie!")
+                        time.sleep(1)
+                        st.rerun()
+                    else:
+                        st.error(f"❌ Błąd zapisu: {msg}")
+                        
+            except Exception as e:
+                st.error(f"Wystąpił błąd w aplikacji: {e}")
                 
     with col_info:
         st.caption("ℹ️ **Instrukcja:** Aby dodać osobę, kliknij wiersz na dole tabeli (lub ikonę `+`). Wpisz dane i kliknij **Zapisz zmiany**.")
@@ -305,16 +288,13 @@ if page == "📂 Baza Klientek":
 elif page == "🤖 Automat SMS":
     st.header("Generator SMS AI")
     
-    # 1. Pobieramy dane
     df = db.get_clients(SALON_ID)
     
     if df.empty:
         st.warning("Najpierw dodaj klientki w bazie (zakładka Baza Klientek)!")
     else:
-        # 2. Konfiguracja Kampanii
         c1, c2 = st.columns(2)
         current_name = st.session_state.get('salon_name', "")
-        
         if not current_name:
             current_name = db.get_salon_name(SALON_ID)
             st.session_state['salon_name'] = current_name
@@ -329,19 +309,17 @@ elif page == "🤖 Automat SMS":
         campaign_goal = c2.text_input("Cel Kampanii:", value=st.session_state['campaign_goal'])
         st.session_state['campaign_goal'] = campaign_goal
 
-        # --- ZMIANA: TABELA ZAMIAST MULTISELECT ---
+        # --- TABELA WYBORU ODBIORCÓW (NOWA) ---
         st.write("---")
         st.subheader("3. Wybierz Odbiorców")
         
-        # Tworzymy kopię danych do wyświetlenia i dodajemy kolumnę "Wybierz"
         selection_df = df.copy()
-        selection_df.insert(0, "Wybierz", False) # Domyślnie odznaczone
+        selection_df.insert(0, "Wybierz", False)
 
-        # Wyświetlamy edytowalną tabelę
         edited_selection = st.data_editor(
             selection_df,
             key="sms_selector_table",
-            height=400, # Wysokość tabeli
+            height=400,
             use_container_width=True,
             hide_index=True,
             column_config={
@@ -349,7 +327,6 @@ elif page == "🤖 Automat SMS":
                 "imie": st.column_config.TextColumn("Klientka", disabled=True),
                 "telefon": st.column_config.TextColumn("Telefon", disabled=True),
                 "ostatni_zabieg": st.column_config.TextColumn("Ostatni Zabieg", disabled=True),
-                # Ukrywamy kolumny techniczne
                 "id": None,
                 "salon_id": None,
                 "user_id": None,
@@ -358,17 +335,15 @@ elif page == "🤖 Automat SMS":
             }
         )
 
-        # Filtrujemy df, biorąc tylko te wiersze, gdzie "Wybierz" jest True
         target_df = edited_selection[edited_selection["Wybierz"] == True]
 
-        # Licznik wybranych osób
         if not target_df.empty:
             st.info(f"✅ Wybrano odbiorców: **{len(target_df)}**")
         else:
             st.warning("⚠️ Nie wybrano nikogo. Zaznacz osoby w tabeli powyżej.")
-        # --- KONIEC ZMIANY ---
 
-        # 4. Generowanie (Podgląd) - RESZTA BEZ ZMIAN
+        # --- KONIEC SEKCJI WYBORU ---
+
         if salon_name and not target_df.empty:
             if st.button("🔍 Generuj Treść (Podgląd)", type="secondary"):
                 sample_row = target_df.iloc[0] 
@@ -412,8 +387,3 @@ elif page == "🤖 Automat SMS":
                     mime='text/csv',
                 )
                 st.session_state['sms_preview'] = None
-
-
-
-
-
