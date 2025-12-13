@@ -118,41 +118,47 @@ def send_sms_via_api(phone, message):
 
 def send_campaign_logic(target_df, campaign_goal, template_content, is_test, progress_bar, preview_client_name, salon_name):
     """
-    Logika pętli wysyłkowej.
-    Poprawiona obsługa paska postępu (enumerate).
+    Logika pętli wysyłkowej z RAPORTOWANIEM.
+    Zwraca DataFrame z podsumowaniem wysyłki.
     """
     total = len(target_df)
     status_box = st.empty()
     
-    # ZMIANA: Dodaliśmy 'enumerate', żeby mieć licznik 'i' (0, 1, 2...)
-    # index to ID z bazy (np. 5, 120), a 'i' to numer kolejny w wysyłce
+    # Lista, do której będziemy zbierać wyniki
+    raport_lista = []
+    
     for i, (index, row) in enumerate(target_df.iterrows()):
-        
-        # Pobieramy dane
         imie = row.get('imie', row.get('Imię', 'Klientko'))
         telefon = row.get('telefon', row.get('Telefon'))
         
-        # --- KROK 1: MÓZG (AI) ---
-        # Generujemy zawsze, żebyś widział efekt
+        # 1. Generowanie (AI)
         final_msg = generate_sms_content(salon_name, row, campaign_goal)
         time.sleep(1.0) 
 
-        # --- KROK 2: RĘCE (WYSYŁKA) ---
+        # 2. Wysyłka / Symulacja
         if is_test:
-            # TEST
-            print(f"🧪 [TEST] {i+1}/{total} | Do: {imie} | Treść: {final_msg}")
+            status_text = "🧪 Test (Symulacja)"
             status_box.info(f"[{i+1}/{total}] Generuję dla: {imie}...\nAI: {final_msg}")
         else:
-            # PRODUKCJA
             success, info = send_sms_via_api(telefon, final_msg)
+            status_text = "✅ Wysłano" if success else f"❌ Błąd: {info}"
             status_box.text(f"[{i+1}/{total}] Wysłano do: {imie}")
             time.sleep(0.2)
 
-        # ZMIANA: Obliczamy postęp używając 'i' (licznika), a nie 'index'
-        # Dodatkowo zabezpieczamy, żeby nigdy nie przekroczyło 1.0
+        # 3. Dodajemy do raportu
+        raport_lista.append({
+            "Imię": imie,
+            "Telefon": telefon,
+            "Treść SMS": final_msg,
+            "Status": status_text
+        })
+
+        # Pasek postępu
         current_progress = (i + 1) / total
         if current_progress > 1.0: current_progress = 1.0
         progress_bar.progress(current_progress)
 
-    status_box.success("Zakończono!")
-    return True
+    status_box.success("Kampania zakończona!")
+    
+    # Zwracamy tabelę z wynikami
+    return pd.DataFrame(raport_lista)
