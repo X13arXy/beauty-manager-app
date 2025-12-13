@@ -207,40 +207,48 @@ if page == "📂 Baza Klientek":
     
     # --- TUTAJ BYŁ BŁĄD WCIĘCIA, TERAZ JEST OK ---
     with col_save:
-        if st.button("💾 Zapisz zmiany w tabeli", type="primary"):
-            try:
-                if edited_database.empty:
-                    st.warning("Tabela jest pusta.")
-                else:
-                    cleaned_data = []
-                    raw_data = edited_database.to_dict(orient='records')
-                    
-                    for row in raw_data:
-                        # a) Uzupełniamy salon_id
-                        row['salon_id'] = SALON_ID
+        if st.button(f"💾 Zapisz zaznaczone"):
+                        to_import = edited_df[edited_df["Dodaj"] == True]
                         
-                        # b) USUWANIE ID dla nowych wierszy (FIX dla Identity Column)
-                        id_val = row.get('id')
-                        # Jeśli ID jest puste, None albo NaN...
-                        if not id_val or pd.isna(id_val):
-                            # ...usuwamy klucz, żeby baza nadała numer sama
-                            if 'id' in row:
-                                del row['id']
-                        
-                        cleaned_data.append(row)
-                    
-                    # c) Wysyłamy do bazy
-                    success, msg = db.update_clients_bulk(cleaned_data)
-                    
-                    if success:
-                        st.success(f"✅ Zapisano pomyślnie!")
-                        time.sleep(1)
-                        st.rerun()
-                    else:
-                        st.error(f"❌ Błąd zapisu: {msg}")
-                        
-            except Exception as e:
-                st.error(f"Wystąpił błąd w aplikacji: {e}")
+                        if to_import.empty:
+                            st.warning("Nie zaznaczono nikogo do importu.")
+                        else:
+                            prog_bar = st.progress(0)
+                            count = len(to_import)
+                            added = 0
+                            errors = [] # Tu będziemy zbierać błędy
+                            
+                            for idx, row in to_import.iterrows():
+                                # Wywołujemy funkcję zapisu
+                                success, msg = db.add_client(
+                                    SALON_ID, 
+                                    str(row["Imię"]), 
+                                    str(row["Telefon"]), 
+                                    str(row["Zabieg"]), 
+                                    None
+                                )
+                                
+                                # SPRAWDZAMY CZY SIĘ UDAŁO
+                                if success:
+                                    added += 1
+                                else:
+                                    errors.append(f"{row['Imię']}: {msg}")
+                                
+                                prog_bar.progress((idx + 1) / count)
+                            
+                            # RAPORT KOŃCOWY
+                            if added > 0:
+                                st.success(f"✅ Pomyślnie dodano {added} kontaktów!")
+                            
+                            if errors:
+                                st.error(f"⚠️ Nie udało się dodać {len(errors)} osób. Oto powody:")
+                                for err in errors:
+                                    st.write(err)
+                            
+                            # Odświeżamy tylko jeśli coś się udało
+                            if added > 0:
+                                time.sleep(2)
+                                st.rerun()
                 
     with col_info:
         st.caption("ℹ️ **Instrukcja:** Aby dodać osobę, kliknij wiersz na dole tabeli (lub ikonę `+`). Wpisz dane i kliknij **Zapisz zmiany**.")
@@ -373,5 +381,6 @@ elif page == "🤖 Automat SMS":
                     mime='text/csv',
                 )
                 st.session_state['sms_preview'] = None
+
 
 
