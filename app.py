@@ -96,32 +96,40 @@ SALON_ID = CURRENT_USER.id
 
 with st.sidebar:
     # Wyświetlamy aktualną nazwę jako nagłówek
-    st.header(f"🏠 {st.session_state.get('salon_name', 'Twój Salon')}")
-    st.caption(f"Zalogowany: {CURRENT_USER.email}")
+    # Używamy .get() na wypadek gdyby sesja jeszcze nie miała tej zmiennej
+    current_salon_name = st.session_state.get('salon_name', 'Twój Salon')
+    st.header(f"🏠 {current_salon_name}")
     
-    # --- NOWOŚĆ: EDYCJA NAZWY W SIDEBARZE ---
+    if CURRENT_USER:
+        st.caption(f"Zalogowany: {CURRENT_USER.email}")
+    
+    # --- EDYCJA NAZWY W SIDEBARZE ---
     with st.expander("⚙️ Ustawienia Salonu"):
-        edit_name = st.text_input("Zmień nazwę:", value=st.session_state.get('salon_name', ""))
+        # Pobieramy obecną nazwę do pola edycji
+        edit_name = st.text_input("Zmień nazwę:", value=current_salon_name)
         
         if st.button("Zapisz nową nazwę"):
             if edit_name:
                 # Aktualizacja w bazie
                 db.update_salon_name(SALON_ID, edit_name)
-                # Aktualizacja w sesji (żeby od razu było widać zmianę)
+                # Aktualizacja w sesji
                 st.session_state['salon_name'] = edit_name
                 st.success("Zmieniono!")
                 time.sleep(1)
-                st.rerun() # Odświeżamy całą apkę, żeby nowa nazwa wskoczyła wszędzie
+                st.rerun()
             else:
                 st.warning("Nazwa nie może być pusta.")
     # ----------------------------------------
 
     st.divider()
     
-    if st.button("Wyloguj"):
+    # TU BYŁ BŁĄD - Dodałem key="logout_btn", żeby Streamlit się nie mylił
+    if st.button("Wyloguj", key="logout_btn"):
         db.logout_user()
         st.session_state['user'] = None
+        st.session_state['salon_name'] = "" # Czyścimy sesję
         st.rerun()
+        
     st.divider()
 
 st.title("Panel Salonu")
@@ -332,4 +340,5 @@ elif page == "🤖 Automat SMS":
                 )
 
                 st.session_state['sms_preview'] = None
+
 
