@@ -209,7 +209,7 @@ if page == "📂 Baza Klientek":
             st.rerun()
     else:
         # --- ZAKŁADKA: AUTOMAT SMS ---
-elif page == "🤖 Automat SMS":
+        elif page == "🤖 Automat SMS":
     st.header("Generator SMS AI")
     
     # 1. NAJPIERW pobieramy dane z bazy (żeby mieć na czym pracować)
@@ -309,6 +309,8 @@ elif page == "🤖 Automat SMS":
 
                 st.session_state['sms_preview'] = None
        
+
+
 
 
 
