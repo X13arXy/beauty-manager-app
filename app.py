@@ -193,43 +193,50 @@ if page == "📂 Baza Klientek":
                     st.error("Nie rozpoznano kolumn Imię/Telefon w pliku.")
 
     # --- 2. TABELA BAZY (NOWA - EDYTOWALNA) ---
-    st.divider()
+   st.divider()
     st.subheader("Edycja Bazy")
     
-    # Pobieramy klientów z bazy
+    # 1. Pobieramy klientów z bazy
     df = db.get_clients(SALON_ID)
     
-    if not df.empty:
-        # Konfigurujemy edytor
-        edited_database = st.data_editor(
-            df,
-            key="main_db_editor",
-            num_rows="dynamic", # Pozwala dodawać nowe wiersze na dole!
-            use_container_width=True,
-            column_config={
-                "id": None,          # Ukrywamy ID (nie chcemy go edytować ręcznie)
-                "salon_id": None,    # Ukrywamy ID salonu
-                "created_at": None,  # Ukrywamy datę utworzenia
-                "imie": st.column_config.TextColumn("Imię i Nazwisko", required=True),
-                "telefon": st.column_config.TextColumn("Telefon", required=True),
-                "ostatni_zabieg": "Ostatni Zabieg",
-                "data_wizyty": st.column_config.DateColumn("Data wizyty")
-            }
-        )
+    # 2. NAPRAWA: Jeśli df jest puste, tworzymy pustą strukturę z odpowiednimi kolumnami.
+    # Dzięki temu tabela się pojawi i będziesz mógł wpisywać dane ręcznie!
+    if df.empty:
+        df = pd.DataFrame(columns=["id", "salon_id", "imie", "telefon", "ostatni_zabieg", "data_wizyty"])
 
-        col_save, col_info = st.columns([1, 4])
-        
-        with col_save:
-            if st.button("💾 Zapisz zmiany w tabeli", type="primary"):
-                try:
-                    # 1. Uzupełniamy salon_id dla nowych wierszy (st.data_editor zostawia je puste/NaN)
+    # 3. Konfigurujemy edytor (wyświetlamy go ZAWSZE, nie w ifie)
+    edited_database = st.data_editor(
+        df,
+        key="main_db_editor",
+        num_rows="dynamic", # To pozwala dodawać nowe wiersze!
+        use_container_width=True,
+        column_config={
+            "id": None,          # Ukryte
+            "salon_id": None,    # Ukryte
+            "created_at": None,  # Ukryte
+            "imie": st.column_config.TextColumn("Imię i Nazwisko", required=True, default="Nowa Klientka"),
+            "telefon": st.column_config.TextColumn("Telefon", required=True, default="48"),
+            "ostatni_zabieg": st.column_config.TextColumn("Ostatni Zabieg", default="Manicure"),
+            "data_wizyty": st.column_config.DateColumn("Data wizyty")
+        }
+    )
+
+    col_save, col_info = st.columns([1, 4])
+    
+    with col_save:
+        if st.button("💾 Zapisz zmiany w tabeli", type="primary"):
+            try:
+                # Filtrujemy puste wiersze (gdyby ktoś dodał wiersz, ale nic nie wpisał)
+                if edited_database.empty:
+                    st.warning("Tabela jest pusta.")
+                else:
+                    # Uzupełniamy salon_id dla nowych wierszy
                     edited_database['salon_id'] = SALON_ID
                     
-                    # 2. Zamieniamy na słownik i wysyłamy do bazy
-                    # orient='records' tworzy listę słowników: [{'imie': 'Anna', ...}, ...]
+                    # Konwersja do słownika
                     data_to_upsert = edited_database.to_dict(orient='records')
                     
-                    # 3. Wywołujemy funkcję z database.py
+                    # Zapis do bazy
                     success, msg = db.update_clients_bulk(data_to_upsert)
                     
                     if success:
@@ -238,22 +245,25 @@ if page == "📂 Baza Klientek":
                         st.rerun()
                     else:
                         st.error(f"Błąd zapisu: {msg}")
-                except Exception as e:
-                    st.error(f"Wystąpił błąd: {e}")
-                    
-        with col_info:
-            st.caption("ℹ️ Możesz edytować komórki bezpośrednio. Kliknij '+' na dole tabeli, aby dodać nowy wiersz.")
+            except Exception as e:
+                st.error(f"Wystąpił błąd: {e}")
+                
+    with col_info:
+        st.caption("ℹ️ **Instrukcja:** Aby dodać osobę, kliknij wiersz na dole tabeli (lub ikonę `+`). Wpisz dane i kliknij **Zapisz zmiany**.")
 
-        # Opcjonalnie: Usuwanie (pozostawiłem osobno, bo jest bezpieczniejsze)
-        with st.expander("🗑️ Usuwanie klientek"):
-            opts = df.set_index('id')['imie'].to_dict()
-            if opts:
-                to_del = st.selectbox("Wybierz osobę do usunięcia:", options=opts.keys(), format_func=lambda x: opts[x])
-                if st.button("Usuń wybraną trwale"):
-                    db.delete_client(to_del, SALON_ID)
-                    st.rerun()
-    else:
-        st.info("Baza jest pusta. Użyj importu lub dodaj pierwszy wpis w tabeli (jeśli włączysz tryb dynamiczny) lub przez formularz.")
+    # Opcjonalnie: Usuwanie
+    with st.expander("🗑️ Usuwanie klientek"):
+        if not df.empty and "imie" in df.columns:
+            # Tworzymy słownik tylko jeśli są dane i mają ID
+            if "id" in df.columns:
+                opts = df.dropna(subset=['id']).set_index('id')['imie'].to_dict()
+                if opts:
+                    to_del = st.selectbox("Wybierz osobę do usunięcia:", options=opts.keys(), format_func=lambda x: opts[x])
+                    if st.button("Usuń wybraną trwale"):
+                        db.delete_client(to_del, SALON_ID)
+                        st.rerun()
+        else:
+            st.write("Brak danych do usunięcia.")
 
 # ========================================================
 # ZAKŁADKA: AUTOMAT SMS
@@ -343,6 +353,7 @@ elif page == "🤖 Automat SMS":
                 )
 
                 st.session_state['sms_preview'] = None
+
 
 
 
