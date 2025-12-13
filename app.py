@@ -22,9 +22,9 @@ if 'preview_client' not in st.session_state: st.session_state['preview_client'] 
 if 'campaign_goal' not in st.session_state: st.session_state['campaign_goal'] = ""
 if 'salon_name' not in st.session_state: st.session_state['salon_name'] = ""
 
-# Zmienne do obsługi tabeli SMS (wersjonowanie klucza naprawia błędy odświeżania)
+# Zmienne do obsługi tabeli SMS (Wersjonowanie naprawia błędy odświeżania)
 if 'sms_data' not in st.session_state: st.session_state['sms_data'] = None
-if 'sms_table_version' not in st.session_state: st.session_state['sms_table_version'] = 0
+if 'sms_version' not in st.session_state: st.session_state['sms_version'] = 0
 
 # ========================================================
 # 1. EKRAN LOGOWANIA I REJESTRACJI
@@ -116,7 +116,7 @@ with st.sidebar:
         db.logout_user()
         st.session_state['user'] = None
         st.session_state['salon_name'] = ""
-        st.session_state['sms_data'] = None # Reset danych SMS
+        st.session_state['sms_data'] = None # Czyścimy cache
         st.rerun()
     st.divider()
 
@@ -188,8 +188,7 @@ if page == "📂 Baza Klientek":
                             
                             if added > 0:
                                 st.success(f"✅ Pomyślnie dodano {added} kontaktów!")
-                                # Resetujemy cache SMS żeby nowi klienci się pojawili
-                                st.session_state['sms_data'] = None 
+                                st.session_state['sms_data'] = None # Reset tabeli SMS po imporcie
                             
                             if errors:
                                 st.error(f"⚠️ Błędy przy {len(errors)} osobach:")
@@ -241,20 +240,17 @@ if page == "📂 Baza Klientek":
                     
                     for row in raw_data:
                         row['salon_id'] = SALON_ID
-                        
                         id_val = row.get('id')
+                        # Czyścimy ID żeby baza nadała nowe, jeśli puste
                         if not id_val or pd.isna(id_val):
-                            if 'id' in row:
-                                del row['id']
-                        
+                            if 'id' in row: del row['id']
                         cleaned_data.append(row)
                     
                     success, msg = db.update_clients_bulk(cleaned_data)
                     
                     if success:
                         st.success(f"✅ Zapisano pomyślnie!")
-                        # Resetujemy cache SMS
-                        st.session_state['sms_data'] = None 
+                        st.session_state['sms_data'] = None # Reset tabeli SMS po edycji
                         time.sleep(1)
                         st.rerun()
                     else:
@@ -287,7 +283,7 @@ if page == "📂 Baza Klientek":
 elif page == "🤖 Automat SMS":
     st.header("Generator SMS AI")
     
-    # 1. Pobieramy świeże dane z bazy
+    # 1. Pobieramy świeże dane
     clients_from_db = db.get_clients(SALON_ID)
     
     if clients_from_db.empty:
@@ -313,33 +309,32 @@ elif page == "🤖 Automat SMS":
         st.write("---")
         st.subheader("3. Wybierz Odbiorców")
         
-        # 1. Inicjalizacja danych w sesji (jeśli puste lub zmieniła się liczba klientów)
+        # Inicjalizacja danych w sesji (jeśli puste lub zmieniła się liczba klientów w bazie)
         if st.session_state['sms_data'] is None or len(st.session_state['sms_data']) != len(clients_from_db):
              temp_df = clients_from_db.copy()
-             # Dodajemy kolumnę "Wybierz" na początku
              temp_df.insert(0, "Wybierz", False)
              st.session_state['sms_data'] = temp_df
 
-        # 2. Przyciski masowego zaznaczania (PROSTA LOGIKA)
+        # Przyciski sterujące
         col_all, col_none, col_space = st.columns([1, 1, 3])
         
+        # Te przyciski tylko zmieniają stan w sesji i odświeżają stronę (rerun)
         if col_all.button("✅ Zaznacz wszystkich"):
              st.session_state['sms_data']['Wybierz'] = True
-             st.session_state['sms_table_version'] += 1 # Zmieniamy wersję, żeby wymusić odświeżenie tabeli
+             st.session_state['sms_version'] += 1 # Zmiana wersji wymusza przerysowanie tabeli
              st.rerun()
 
         if col_none.button("❌ Odznacz wszystkich"):
              st.session_state['sms_data']['Wybierz'] = False
-             st.session_state['sms_table_version'] += 1
+             st.session_state['sms_version'] += 1
              st.rerun()
 
-        # 3. Wyświetlanie tabeli (Data Editor)
-        # Używamy dynamicznego klucza (key), żeby tabela wiedziała kiedy się całkowicie przeładować
-        current_key = f"sms_table_v{st.session_state['sms_table_version']}"
+        # Wyświetlanie tabeli - Klucz jest dynamiczny (zawiera wersję), co naprawia błędy odświeżania
+        table_key = f"sms_table_v{st.session_state['sms_version']}"
         
         edited_selection = st.data_editor(
             st.session_state['sms_data'],
-            key=current_key,
+            key=table_key,
             height=400,
             use_container_width=True,
             hide_index=True,
@@ -351,11 +346,10 @@ elif page == "🤖 Automat SMS":
                 "id": None, "salon_id": None, "user_id": None, "created_at": None, "data_wizyty": None
             }
         )
-
-        # Ważne: Aktualizujemy stan sesji, żeby zapamiętać ręczne kliknięcia
+        
+        # Zapisujemy ręczne zmiany (pojedyncze kliknięcia) z powrotem do sesji
         st.session_state['sms_data'] = edited_selection
 
-        # 4. Filtrowanie
         target_df = edited_selection[edited_selection["Wybierz"] == True]
 
         if not target_df.empty:
