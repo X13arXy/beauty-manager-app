@@ -119,38 +119,41 @@ def send_sms_via_api(phone, message):
 def send_campaign_logic(target_df, campaign_goal, template_content, is_test, progress_bar, preview_client_name, salon_name):
     """
     Logika pętli wysyłkowej.
-    Dla każdego klienta generuje nową treść AI (personalizacja).
+    W tej wersji AI generuje treść ZAWSZE (nawet w teście), 
+    ale SMSAPI jest blokowane w trybie testowym.
     """
     total = len(target_df)
     
+    # Tworzymy kontener w Streamlit, żebyś widział na żywo co AI wymyśla
+    status_box = st.empty()
+    
     for index, row in target_df.iterrows():
-        # 1. PERSONALIZACJA
+        # Pobieramy dane
         imie = row.get('imie', row.get('Imię', 'Klientko'))
+        telefon = row.get('telefon', row.get('Telefon'))
         
-        # Generujemy treść AI (z opóźnieniem żeby nie zbanowali API Google)
-        if not is_test:
-            # W trybie produkcji generujemy realnie przez AI
-            final_msg = generate_sms_content(salon_name, row, campaign_goal)
-            time.sleep(1.0) # Ważne opóźnienie dla API Google
-        else:
-            # W trybie testowym symulujemy generowanie
-            # Podmieniamy tylko imię w szablonie podglądu
-            if isinstance(template_content, str):
-                final_msg = template_content.replace(str(preview_client_name), str(imie))
-            else:
-                final_msg = f"Test SMS dla {imie}"
-            time.sleep(0.5) 
+        # --- KROK 1: MÓZG (AI) ---
+        # Teraz generujemy ZAWSZE, niezależnie czy to test czy produkcja
+        # Dzięki temu widzisz kreatywność AI
+        final_msg = generate_sms_content(salon_name, row, campaign_goal)
+        
+        # Opóźnienie jest konieczne, żeby Google nas nie zablokował za spamowanie API
+        time.sleep(1.0) 
 
-        # 2. WYSYŁKA (LUB SYMULACJA)
-        phone = row.get('telefon', row.get('Telefon'))
-        
+        # --- KROK 2: RĘCE (WYSYŁKA) ---
         if is_test:
-            print(f"[TEST] Do: {phone} | Treść: {final_msg}")
+            # TRYB TESTOWY: Nie wysyłamy, tylko pokazujemy na ekranie
+            msg_log = f"🧪 [TEST] Dla: {imie} ({telefon}) | Treść: {final_msg}"
+            print(msg_log) # Zobaczysz to w konsoli
+            status_box.info(f"Generuję dla: {imie}...\nAI: {final_msg}") # Zobaczysz to w apce
         else:
-            success, info = send_sms_via_api(phone, final_msg)
+            # TRYB PRODUKCJA: Wysyłamy naprawdę
+            success, info = send_sms_via_api(telefon, final_msg)
+            status_box.text(f"Wysłano do: {imie}")
             time.sleep(0.2) # Opóźnienie dla SMSAPI
 
         # Aktualizacja paska postępu
         progress_bar.progress((index + 1) / total)
 
+    status_box.success("Zakończono!")
     return True
