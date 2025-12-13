@@ -200,23 +200,48 @@ if page == "📂 Baza Klientek":
 
     col_save, col_info = st.columns([1, 4])
     
-    with col_save:
-        if st.button("💾 Zapisz zmiany w tabeli", type="primary"):
-            try:
-                if edited_database.empty:
-                    st.warning("Tabela jest pusta.")
-                else:
-                    edited_database['salon_id'] = SALON_ID
-                    data_to_upsert = edited_database.to_dict(orient='records')
-                    success, msg = db.update_clients_bulk(data_to_upsert)
-                    if success:
-                        st.success(msg)
-                        time.sleep(1)
-                        st.rerun()
+   with col_save:
+            if st.button("💾 Zapisz zmiany w tabeli", type="primary"):
+                try:
+                    if edited_database.empty:
+                        st.warning("Tabela jest pusta.")
                     else:
-                        st.error(f"Błąd zapisu: {msg}")
-            except Exception as e:
-                st.error(f"Wystąpił błąd: {e}")
+                        # 1. Przygotowujemy listę
+                        cleaned_data = []
+                        
+                        # 2. Pobieramy dane jako słowniki
+                        raw_data = edited_database.to_dict(orient='records')
+                        
+                        for row in raw_data:
+                            # a) Uzupełniamy salon_id
+                            row['salon_id'] = SALON_ID
+                            
+                            # b) INTELIGENTNE USUWANIE ID
+                            # Sprawdzamy czy ID jest puste, None, albo NaN (Not a Number)
+                            id_val = row.get('id')
+                            
+                            # Jeśli ID nie istnieje, jest zerem, pustym napisem lub NaN...
+                            if not id_val or pd.isna(id_val):
+                                # ...to usuwamy klucz 'id' całkowicie.
+                                # Dzięki temu baza użyje swojego automatu (1, 2, 3...)
+                                if 'id' in row:
+                                    del row['id']
+                            
+                            cleaned_data.append(row)
+                        
+                        # 3. Wysyłamy do Supabase
+                        # Używamy upsert - dla wierszy bez ID zrobi INSERT, dla tych z ID zrobi UPDATE
+                        success, msg = db.update_clients_bulk(cleaned_data)
+                        
+                        if success:
+                            st.success(f"✅ Zapisano pomyślnie!")
+                            time.sleep(1)
+                            st.rerun()
+                        else:
+                            st.error(f"❌ Błąd zapisu: {msg}")
+                            
+                except Exception as e:
+                    st.error(f"Wystąpił błąd w aplikacji: {e}")
                 
     with col_info:
         st.caption("ℹ️ **Instrukcja:** Aby dodać osobę, kliknij wiersz na dole tabeli (lub ikonę `+`). Wpisz dane i kliknij **Zapisz zmiany**.")
@@ -311,3 +336,4 @@ elif page == "🤖 Automat SMS":
                     mime='text/csv',
                 )
                 st.session_state['sms_preview'] = None
+
