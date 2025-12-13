@@ -134,16 +134,6 @@ with st.sidebar:
 
 st.title("Panel Salonu")
 # ... (reszta kodu bez zmian)
-with st.sidebar:
-    # Wyświetlamy nazwę salonu w pasku bocznym
-    st.header(f"🏠 {st.session_state.get('salon_name', 'Twój Salon')}")
-    st.caption(f"Zalogowany: {CURRENT_USER.email}")
-    
-    if st.button("Wyloguj"):
-        db.logout_user()
-        st.session_state['user'] = None
-        st.rerun()
-    st.divider()
 
 st.title("Panel Salonu")
 page = st.sidebar.radio("Menu", ["📂 Baza Klientek", "🤖 Automat SMS"])
@@ -340,5 +330,6 @@ elif page == "🤖 Automat SMS":
                 )
 
                 st.session_state['sms_preview'] = None
+
 
 
