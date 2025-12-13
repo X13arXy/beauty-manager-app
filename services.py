@@ -119,41 +119,40 @@ def send_sms_via_api(phone, message):
 def send_campaign_logic(target_df, campaign_goal, template_content, is_test, progress_bar, preview_client_name, salon_name):
     """
     Logika pętli wysyłkowej.
-    W tej wersji AI generuje treść ZAWSZE (nawet w teście), 
-    ale SMSAPI jest blokowane w trybie testowym.
+    Poprawiona obsługa paska postępu (enumerate).
     """
     total = len(target_df)
-    
-    # Tworzymy kontener w Streamlit, żebyś widział na żywo co AI wymyśla
     status_box = st.empty()
     
-    for index, row in target_df.iterrows():
+    # ZMIANA: Dodaliśmy 'enumerate', żeby mieć licznik 'i' (0, 1, 2...)
+    # index to ID z bazy (np. 5, 120), a 'i' to numer kolejny w wysyłce
+    for i, (index, row) in enumerate(target_df.iterrows()):
+        
         # Pobieramy dane
         imie = row.get('imie', row.get('Imię', 'Klientko'))
         telefon = row.get('telefon', row.get('Telefon'))
         
         # --- KROK 1: MÓZG (AI) ---
-        # Teraz generujemy ZAWSZE, niezależnie czy to test czy produkcja
-        # Dzięki temu widzisz kreatywność AI
+        # Generujemy zawsze, żebyś widział efekt
         final_msg = generate_sms_content(salon_name, row, campaign_goal)
-        
-        # Opóźnienie jest konieczne, żeby Google nas nie zablokował za spamowanie API
         time.sleep(1.0) 
 
         # --- KROK 2: RĘCE (WYSYŁKA) ---
         if is_test:
-            # TRYB TESTOWY: Nie wysyłamy, tylko pokazujemy na ekranie
-            msg_log = f"🧪 [TEST] Dla: {imie} ({telefon}) | Treść: {final_msg}"
-            print(msg_log) # Zobaczysz to w konsoli
-            status_box.info(f"Generuję dla: {imie}...\nAI: {final_msg}") # Zobaczysz to w apce
+            # TEST
+            print(f"🧪 [TEST] {i+1}/{total} | Do: {imie} | Treść: {final_msg}")
+            status_box.info(f"[{i+1}/{total}] Generuję dla: {imie}...\nAI: {final_msg}")
         else:
-            # TRYB PRODUKCJA: Wysyłamy naprawdę
+            # PRODUKCJA
             success, info = send_sms_via_api(telefon, final_msg)
-            status_box.text(f"Wysłano do: {imie}")
-            time.sleep(0.2) # Opóźnienie dla SMSAPI
+            status_box.text(f"[{i+1}/{total}] Wysłano do: {imie}")
+            time.sleep(0.2)
 
-        # Aktualizacja paska postępu
-        progress_bar.progress((index + 1) / total)
+        # ZMIANA: Obliczamy postęp używając 'i' (licznika), a nie 'index'
+        # Dodatkowo zabezpieczamy, żeby nigdy nie przekroczyło 1.0
+        current_progress = (i + 1) / total
+        if current_progress > 1.0: current_progress = 1.0
+        progress_bar.progress(current_progress)
 
     status_box.success("Zakończono!")
     return True
