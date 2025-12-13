@@ -113,3 +113,54 @@ def send_sms_via_api(phone, message):
         return True, "OK"
     except Exception as e:
         return False, str(e)
+    def send_campaign_logic(target_df, campaign_goal, template_content, is_test, progress_bar, preview_client_name):
+    """
+    Logika pętli wysyłkowej.
+    Dla każdego klienta generuje nową treść AI (personalizacja).
+    """
+    
+    # Pobieramy nazwę salonu z template (lub można przekazać jako argument)
+    # Zakładamy, że podpis jest na końcu po słowie "zaprasza" lub po prostu bierzemy z kontekstu
+    # Ale bezpieczniej w app.py przekazać salon_name. 
+    # Na razie dla uproszczenia wyciągniemy to z kontekstu lub użyjemy "Twój Salon" jeśli brakuje.
+    salon_name = "Twój Salon" # To warto poprawić przekazując zmienną z app.py
+
+    total = len(target_df)
+    results = []
+    
+    for index, row in target_df.iterrows():
+        # 1. PERSONALIZACJA: Generujemy treść dla TEJ KONKRETNEJ klientki
+        # Używamy tej samej funkcji co przy podglądzie, ale z danymi z wiersza (row)
+        
+        # Pobieramy imię z bazy (obsługa małych/wielkich liter)
+        imie = row.get('imie', row.get('Imię', 'Klientko'))
+        ostatni = row.get('ostatni_zabieg', 'nieznany')
+        
+        # Generujemy treść AI (z opóźnieniem żeby nie zbanowali API Google)
+        if not is_test:
+            # W trybie produkcji generujemy realnie przez AI
+            final_msg = generate_sms_content(salon_name, row, campaign_goal)
+            time.sleep(1.0) # Ważne opóźnienie dla API Google
+        else:
+            # W trybie testowym symulujemy generowanie (żeby było szybciej i taniej)
+            # Podmieniamy tylko imię w treści z podglądu, żebyś widział że działa
+            final_msg = template_content.replace(preview_client_name, str(imie))
+            time.sleep(0.5) # Symulacja czasu pracy
+
+        # 2. WYSYŁKA (LUB SYMULACJA)
+        phone = row.get('telefon', row.get('Telefon'))
+        
+        if is_test:
+            # SYMULACJA - nie płacimy
+            status = "✅ TEST OK (Symulacja)"
+            print(f"[TEST] Do: {phone} | Treść: {final_msg}") # Zobaczysz to w konsoli
+        else:
+            # PRODUKCJA - płacimy
+            success, info = send_sms_via_api(phone, final_msg)
+            status = "✅ Wysłano" if success else f"❌ Błąd: {info}"
+            time.sleep(0.2) # Opóźnienie dla SMSAPI
+
+        # Aktualizacja paska postępu
+        progress_bar.progress((index + 1) / total)
+
+    return True
