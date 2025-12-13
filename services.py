@@ -118,7 +118,8 @@ def send_sms_via_api(phone, message):
     Logika pętli wysyłkowej.
     Dla każdego klienta generuje nową treść AI (personalizacja).
     """
-    
+    # W services.py zmień definicję funkcji na:
+    def send_campaign_logic(target_df, campaign_goal, template_content, is_test, progress_bar, preview_client_name, salon_name):
     # Pobieramy nazwę salonu z template (lub można przekazać jako argument)
     # Zakładamy, że podpis jest na końcu po słowie "zaprasza" lub po prostu bierzemy z kontekstu
     # Ale bezpieczniej w app.py przekazać salon_name. 
