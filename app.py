@@ -21,6 +21,8 @@ if 'sms_preview' not in st.session_state: st.session_state['sms_preview'] = None
 if 'preview_client' not in st.session_state: st.session_state['preview_client'] = None
 if 'campaign_goal' not in st.session_state: st.session_state['campaign_goal'] = ""
 if 'salon_name' not in st.session_state: st.session_state['salon_name'] = ""
+# Nowa zmienna do trzymania stanu tabeli SMS
+if 'sms_selection_df' not in st.session_state: st.session_state['sms_selection_df'] = None
 
 # ========================================================
 # 1. EKRAN LOGOWANIA I REJESTRACJI
@@ -112,6 +114,7 @@ with st.sidebar:
         db.logout_user()
         st.session_state['user'] = None
         st.session_state['salon_name'] = ""
+        st.session_state['sms_selection_df'] = None # Czyścimy wybór przy wylogowaniu
         st.rerun()
     st.divider()
 
@@ -152,13 +155,9 @@ if page == "📂 Baza Klientek":
                     
                     st.write("Edytuj listę przed importem:")
                     
-                    # 1. TU TWORZYMY ZMIENNĄ edited_df
                     edited_df = st.data_editor(df_to_show, hide_index=True, use_container_width=True)
                     
-                    # 2. PRZYCISK MUSI BYĆ NA TYM SAMYM POZIOMIE WCIĘCIA CO edited_df
                     if st.button(f"💾 Zapisz zaznaczone"):
-                        
-                        # Teraz Python widzi edited_df, bo jesteśmy "wewnątrz" bloku
                         to_import = edited_df[edited_df["Dodaj"] == True]
                         
                         if to_import.empty:
@@ -199,18 +198,15 @@ if page == "📂 Baza Klientek":
                 else:
                     st.error("Nie rozpoznano kolumn Imię/Telefon w pliku.")
 
-    # --- 2. TABELA BAZY (POPRAWIONA) ---
+    # --- 2. TABELA BAZY ---
     st.divider()
     st.subheader("Edycja Bazy")
     
-    # 1. Pobieramy klientów z bazy
     df = db.get_clients(SALON_ID)
     
-    # 2. Jeśli df jest puste, tworzymy pustą strukturę
     if df.empty:
         df = pd.DataFrame(columns=["id", "salon_id", "imie", "telefon", "ostatni_zabieg", "data_wizyty"])
 
-    # 3. Konfigurujemy edytor
     edited_database = st.data_editor(
         df,
         key="main_db_editor",
@@ -219,7 +215,7 @@ if page == "📂 Baza Klientek":
         column_config={
             "id": None,
             "salon_id": None,
-            "user_id": None,      # Ukrywamy user_id
+            "user_id": None,
             "created_at": None,
             "imie": st.column_config.TextColumn("Imię i Nazwisko", required=True, default="Nowa Klientka"),
             "telefon": st.column_config.TextColumn("Telefon", required=True, default="48"),
@@ -240,10 +236,8 @@ if page == "📂 Baza Klientek":
                     raw_data = edited_database.to_dict(orient='records')
                     
                     for row in raw_data:
-                        # a) Uzupełniamy salon_id
                         row['salon_id'] = SALON_ID
                         
-                        # b) USUWANIE ID dla nowych wierszy
                         id_val = row.get('id')
                         if not id_val or pd.isna(id_val):
                             if 'id' in row:
@@ -251,7 +245,6 @@ if page == "📂 Baza Klientek":
                         
                         cleaned_data.append(row)
                     
-                    # c) Wysyłamy do bazy
                     success, msg = db.update_clients_bulk(cleaned_data)
                     
                     if success:
@@ -267,7 +260,6 @@ if page == "📂 Baza Klientek":
     with col_info:
         st.caption("ℹ️ **Instrukcja:** Aby dodać osobę, kliknij wiersz na dole tabeli (lub ikonę `+`). Wpisz dane i kliknij **Zapisz zmiany**.")
 
-    # Opcjonalnie: Usuwanie
     with st.expander("🗑️ Usuwanie klientek"):
         if not df.empty and "imie" in df.columns and "id" in df.columns:
             valid_rows = df.dropna(subset=['id'])
@@ -309,15 +301,32 @@ elif page == "🤖 Automat SMS":
         campaign_goal = c2.text_input("Cel Kampanii:", value=st.session_state['campaign_goal'])
         st.session_state['campaign_goal'] = campaign_goal
 
-        # --- TABELA WYBORU ODBIORCÓW (NOWA) ---
+        # --- SEKCJA WYBORU ODBIORCÓW ---
         st.write("---")
         st.subheader("3. Wybierz Odbiorców")
         
-        selection_df = df.copy()
-        selection_df.insert(0, "Wybierz", False)
+        # LOGIKA PRZYCISKÓW "ZAZNACZ WSZYSTKICH"
+        # 1. Sprawdzamy, czy dane w sesji są aktualne (np. czy nie doszedł nowy klient)
+        # Jeśli nie mamy danych w sesji LUB liczba wierszy się różni -> inicjalizujemy od nowa
+        if st.session_state['sms_selection_df'] is None or len(st.session_state['sms_selection_df']) != len(df):
+             temp_df = df.copy()
+             temp_df.insert(0, "Wybierz", False)
+             st.session_state['sms_selection_df'] = temp_df
 
+        # 2. Przyciski sterujące
+        col_all, col_none, col_space = st.columns([1, 1, 3])
+        
+        if col_all.button("✅ Zaznacz wszystkich"):
+             st.session_state['sms_selection_df']["Wybierz"] = True
+             st.rerun()
+
+        if col_none.button("❌ Odznacz wszystkich"):
+             st.session_state['sms_selection_df']["Wybierz"] = False
+             st.rerun()
+
+        # 3. Wyświetlanie tabeli pobieranej Z SESJI
         edited_selection = st.data_editor(
-            selection_df,
+            st.session_state['sms_selection_df'],
             key="sms_selector_table",
             height=400,
             use_container_width=True,
@@ -334,6 +343,9 @@ elif page == "🤖 Automat SMS":
                 "data_wizyty": None
             }
         )
+        
+        # 4. Aktualizacja stanu w sesji (żeby zapamiętał ręczne kliknięcia)
+        st.session_state['sms_selection_df'] = edited_selection
 
         target_df = edited_selection[edited_selection["Wybierz"] == True]
 
