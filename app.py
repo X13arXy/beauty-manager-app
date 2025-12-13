@@ -23,9 +23,7 @@ if 'campaign_goal' not in st.session_state: st.session_state['campaign_goal'] = 
 if 'salon_name' not in st.session_state: st.session_state['salon_name'] = ""
 
 # Zmienne do obsługi przycisków masowego zaznaczania
-# Wersja klucza pozwala nam "zresetować" tabelę tylko wtedy, gdy klikniemy przycisk
 if 'sms_table_key_version' not in st.session_state: st.session_state['sms_table_key_version'] = 0
-# Domyślna wartość zaznaczenia (False = odznaczeni, True = zaznaczeni)
 if 'sms_default_check' not in st.session_state: st.session_state['sms_default_check'] = False
 
 # ========================================================
@@ -288,20 +286,14 @@ elif page == "🤖 Automat SMS":
     if clients_from_db.empty:
         st.warning("Najpierw dodaj klientki w bazie (zakładka Baza Klientek)!")
     else:
-        c1, c2 = st.columns(2)
+        # Pobieramy nazwę salonu po cichu (bez wyświetlania inputu)
         current_name = st.session_state.get('salon_name', "")
         if not current_name:
             current_name = db.get_salon_name(SALON_ID)
             st.session_state['salon_name'] = current_name
-
-        salon_name = c1.text_input("Nazwa salonu (Podpis SMS):", value=current_name)
         
-        if salon_name != current_name:
-            db.update_salon_name(SALON_ID, salon_name)
-            st.session_state['salon_name'] = salon_name
-            st.toast("✅ Zaktualizowano nazwę salonu!")
-        
-        campaign_goal = c2.text_input("Cel Kampanii:", value=st.session_state['campaign_goal'])
+        # Zmieniamy: Tylko jeden input "Cel Kampanii" (bez kolumn)
+        campaign_goal = st.text_input("Cel Kampanii:", value=st.session_state['campaign_goal'], placeholder="np. Promocja na hybrydę -20% do końca tygodnia")
         st.session_state['campaign_goal'] = campaign_goal
 
         # --- SEKCJA WYBORU ODBIORCÓW ---
@@ -309,16 +301,12 @@ elif page == "🤖 Automat SMS":
         st.subheader("3. Wybierz Odbiorców")
         
         # LOGIKA DZIAŁANIA JAK W EDYCJA BAZY:
-        # 1. Przygotowujemy dane (zawsze świeże z bazy)
         selection_df = clients_from_db.copy()
-        
-        # 2. Dodajemy kolumnę "Wybierz" z domyślną wartością (zależną od przycisków)
         selection_df.insert(0, "Wybierz", st.session_state['sms_default_check'])
 
-        # 3. Przyciski masowe
+        # Przyciski masowe
         col_all, col_none, col_space = st.columns([1, 1, 3])
         
-        # Kliknięcie przycisku zmienia TYLKO domyślny stan i wymusza odświeżenie tabeli nowym kluczem
         if col_all.button("✅ Zaznacz wszystkich"):
              st.session_state['sms_default_check'] = True
              st.session_state['sms_table_key_version'] += 1 
@@ -329,9 +317,7 @@ elif page == "🤖 Automat SMS":
              st.session_state['sms_table_key_version'] += 1
              st.rerun()
 
-        # 4. Tabela
-        # Klucz dynamiczny (key) zmienia się TYLKO po kliknięciu przycisków masowych.
-        # Podczas normalnego klikania klucz jest stały, więc Streamlit pamięta zaznaczenia i działa płynnie.
+        # Tabela
         current_key = f"sms_selector_v{st.session_state['sms_table_key_version']}"
 
         edited_selection = st.data_editor(
@@ -345,12 +331,10 @@ elif page == "🤖 Automat SMS":
                 "imie": st.column_config.TextColumn("Klientka", disabled=True),
                 "telefon": st.column_config.TextColumn("Telefon", disabled=True),
                 "ostatni_zabieg": st.column_config.TextColumn("Ostatni Zabieg", disabled=True),
-                # Ukrywamy techniczne
                 "id": None, "salon_id": None, "user_id": None, "created_at": None, "data_wizyty": None
             }
         )
 
-        # 5. Wynik
         target_df = edited_selection[edited_selection["Wybierz"] == True]
 
         if not target_df.empty:
@@ -360,10 +344,10 @@ elif page == "🤖 Automat SMS":
 
         # --- KONIEC SEKCJI WYBORU ---
 
-        if salon_name and not target_df.empty:
+        if current_name and not target_df.empty:
             if st.button("🔍 Generuj Treść (Podgląd)", type="secondary"):
                 sample_row = target_df.iloc[0] 
-                content = srv.generate_sms_content(salon_name, sample_row, campaign_goal)
+                content = srv.generate_sms_content(current_name, sample_row, campaign_goal)
                 if content:
                     st.session_state['sms_preview'] = content
                     st.session_state['preview_client'] = sample_row.get('imie', 'Klientka')
