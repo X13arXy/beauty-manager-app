@@ -196,15 +196,11 @@ elif page == "🤖 Automat SMS":
                 # Wywołanie logiki z services.py
                 srv.send_campaign_logic(
                     target_df, 
-                    st.session_state['campaign_goal'], # lub tekst, w zaleznosci co chcemy przekazac
-                    st.session_state['sms_preview'], # Tu przekazujemy wygenerowany tekst
+                    st.session_state['campaign_goal'],
+                    st.session_state['sms_preview'],
                     is_test, 
                     progress_bar, 
-                    st.session_state['preview_client']
-                ) # Uwaga: poprawilem argumenty w wywolaniu, zeby pasowaly do services.py
-                
-                st.balloons()
-                st.success("Wysłano!")
-                st.session_state['sms_preview'] = None
-
+                    st.session_state['preview_client'],
+                    st.session_state['salon_name'] # <--- DODANO TO
+                    )
 
