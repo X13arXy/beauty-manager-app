@@ -208,50 +208,78 @@ if page == "📂 Baza Klientek":
             db.delete_client(to_del, SALON_ID)
             st.rerun()
     else:
-        st.info("Baza pusta.")
-# --- ZAKŁADKA: AUTOMAT SMS ---
-# 1. Konfiguracja
+        # --- ZAKŁADKA: AUTOMAT SMS ---
+elif page == "🤖 Automat SMS":
+    st.header("Generator SMS AI")
+    
+    # 1. NAJPIERW pobieramy dane z bazy (żeby mieć na czym pracować)
+    df = db.get_clients(SALON_ID)
+    
+    if df.empty:
+        st.warning("Najpierw dodaj klientki w bazie (zakładka Baza Klientek)!")
+    else:
+        # 2. Konfiguracja (Salon + Cel)
         c1, c2 = st.columns(2)
         
-        # --- ZMIANA: Pole nazwy salonu z auto-zapisem ---
+        # --- LOGIKA: Nazwa salonu z auto-zapisem ---
         current_name = st.session_state.get('salon_name', "")
+        
+        # Jeśli w sesji pusto, próbujemy pobrać z bazy
+        if not current_name:
+            current_name = db.get_salon_name(SALON_ID)
+            st.session_state['salon_name'] = current_name
+
         salon_name = c1.text_input("Nazwa salonu (Podpis SMS):", value=current_name)
         
-        # Jeśli użytkownik zmienił nazwę w polu, zapisz ją od razu do bazy i sesji
+        # Zapis do bazy przy zmianie
         if salon_name != current_name:
             db.update_salon_name(SALON_ID, salon_name)
             st.session_state['salon_name'] = salon_name
             st.toast("✅ Zapisano nową nazwę salonu!")
-        # -----------------------------------------------
+        # -------------------------------------------
         
         campaign_goal = c2.text_input("Cel Kampanii (np. promocja na hybrydę):", value=st.session_state['campaign_goal'])
         st.session_state['campaign_goal'] = campaign_goal
 
-        # 2. Generowanie
+        # 3. Wybór Odbiorców (To musi być PRZED sprawdzeniem if target_df!)
+        st.write("---")
+        wybrane = st.multiselect("Odbiorcy:", df['imie'].tolist(), default=df['imie'].tolist())
+        
+        # --- TU DEFINIUJEMY target_df (naprawa błędu NameError) ---
+        target_df = df[df['imie'].isin(wybrane)]
+        # ----------------------------------------------------------
+
+        # 4. Generowanie Treści
+        # Teraz target_df już istnieje, więc Python nie zgłosi błędu
         if salon_name and not target_df.empty:
-            if st.button("🔍 Generuj Treść", type="secondary"):
-                # Pobierz przykładowe imię
-                sample_name = target_df.iloc[0]['imie']
-                content = srv.generate_sms_content(salon_name, sample_name, campaign_goal)
+            if st.button("🔍 Generuj Treść (Podgląd)", type="secondary"):
+                # Pobieramy przykładowy wiersz
+                sample_row = target_df.iloc[0] 
+                
+                # Generujemy treść (przekazujemy wiersz, nie sam string)
+                content = srv.generate_sms_content(salon_name, sample_row, campaign_goal)
+                
                 if content:
                     st.session_state['sms_preview'] = content
-                    st.session_state['preview_client'] = sample_name
+                    st.session_state['preview_client'] = sample_row.get('imie', 'Klientka')
                     st.rerun()
 
-        # 3. Podgląd i Wysyłka
+        # 5. Podgląd, Wysyłka i Raport
         if st.session_state['sms_preview']:
             st.divider()
-            st.subheader("Podgląd SMS:")
+            st.subheader("Podgląd SMS (dla pierwszej osoby):")
+            st.info(f"Odbiorca przykładowy: {st.session_state['preview_client']}")
             st.code(st.session_state['sms_preview'], language='text')
             
             col_opt, col_btn = st.columns([2, 1])
-            mode = col_opt.radio("Tryb wysyłki:", ["🧪 Test (tylko konsola)", "💸 Produkcja (SMSAPI)"])
+            mode = col_opt.radio("Tryb wysyłki:", ["🧪 Test (Symulacja AI)", "💸 Produkcja (SMSAPI)"])
             is_test = (mode.startswith("🧪"))
             
             if col_btn.button("🚀 WYŚLIJ KAMPANIĘ", type="primary"):
                 progress_bar = st.progress(0.0)
                 
-                # ZMIANA: Przypisujemy wynik funkcji do zmiennej 'raport_df'
+                # Wywołanie logiki wysyłki z services.py
+                # Funkcja zwraca teraz tabelę (DataFrame) z wynikami
                 raport_df = srv.send_campaign_logic(
                     target_df, 
                     st.session_state['campaign_goal'],
@@ -263,14 +291,14 @@ if page == "📂 Baza Klientek":
                 ) 
                 
                 st.balloons()
-                st.success("Wysłano!")
+                st.success("Proces zakończony!")
                 
-                # ZMIANA: Wyświetlamy tabelę z raportem
+                # --- RAPORT ---
                 st.divider()
                 st.subheader("📊 Raport z wysyłki")
                 st.dataframe(raport_df, use_container_width=True)
                 
-                # Dodatkowy bajer: Przycisk do pobrania raportu
+                # Przycisk pobierania CSV
                 csv = raport_df.to_csv(index=False).encode('utf-8')
                 st.download_button(
                     label="📥 Pobierz raport (CSV)",
@@ -280,8 +308,7 @@ if page == "📂 Baza Klientek":
                 )
 
                 st.session_state['sms_preview'] = None
-
-
+       
 
 
 
