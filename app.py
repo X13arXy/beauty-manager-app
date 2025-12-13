@@ -25,12 +25,14 @@ if 'salon_name' not in st.session_state: st.session_state['salon_name'] = ""
 # ========================================================
 # 1. EKRAN LOGOWANIA
 # ========================================================
+
 if not st.session_state['user']:
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         st.title("💅 Beauty SaaS")
-        tab1, tab2 = st.tabs(["Logowanie", "Rejestracja"])
+        tab1, tab2, tab3 = st.tabs(["Logowanie", "Rejestracja", "Reset Hasła"])
         
+        # --- LOGOWANIE ---
         with tab1:
             l_email = st.text_input("Email", key="l1")
             l_pass = st.text_input("Hasło", type="password", key="l2")
@@ -41,15 +43,39 @@ if not st.session_state['user']:
                     st.success("✅ Zalogowano!")
                     st.rerun()
         
+        # --- REJESTRACJA ---
         with tab2:
             r_email = st.text_input("Email", key="r1")
             r_pass = st.text_input("Hasło", type="password", key="r2")
+            
+            # MUST HAVE: Zgody prawne
+            zgoda = st.checkbox("Akceptuję Regulamin i Politykę Prywatności *")
+            
             if st.button("Załóż konto"):
-                user = db.register_user(r_email, r_pass)
-                if user:
-                    st.session_state['user'] = user
-                    st.success("✅ Konto utworzone!")
-                    st.rerun()
+                if not zgoda:
+                    st.warning("Musisz zaakceptować regulamin!")
+                else:
+                    user = db.register_user(r_email, r_pass)
+                    if user:
+                        st.session_state['user'] = user
+                        st.success("✅ Konto utworzone! Sprawdź email w celu weryfikacji.")
+                        time.sleep(2)
+                        st.rerun()
+
+        # --- MUST HAVE: RESET HASŁA ---
+        with tab3:
+            st.write("Zapomniałeś hasła? Podaj email, wyślemy link.")
+            reset_email = st.text_input("Twój Email", key="res1")
+            if st.button("Wyślij link resetujący"):
+                if reset_email:
+                    ok, msg = db.reset_password_email(reset_email)
+                    if ok:
+                        st.success(msg)
+                    else:
+                        st.error(f"Błąd: {msg}")
+                else:
+                    st.warning("Podaj email.")
+
     st.stop()
 
 # ========================================================
@@ -253,5 +279,6 @@ elif page == "🤖 Automat SMS":
                 )
 
                 st.session_state['sms_preview'] = None
+
 
 
