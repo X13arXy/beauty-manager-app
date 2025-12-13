@@ -193,14 +193,33 @@ elif page == "🤖 Automat SMS":
             if col_btn.button("🚀 WYŚLIJ KAMPANIĘ", type="primary"):
                 progress_bar = st.progress(0.0)
                 
-                # Wywołanie logiki z services.py
-                srv.send_campaign_logic(
+                # ZMIANA: Przypisujemy wynik funkcji do zmiennej 'raport_df'
+                raport_df = srv.send_campaign_logic(
                     target_df, 
                     st.session_state['campaign_goal'],
                     st.session_state['sms_preview'],
                     is_test, 
                     progress_bar, 
                     st.session_state['preview_client'],
-                    st.session_state['salon_name'] # <--- DODANO TO
-                    )
+                    st.session_state['salon_name']
+                ) 
+                
+                st.balloons()
+                st.success("Wysłano!")
+                
+                # ZMIANA: Wyświetlamy tabelę z raportem
+                st.divider()
+                st.subheader("📊 Raport z wysyłki")
+                st.dataframe(raport_df, use_container_width=True)
+                
+                # Dodatkowy bajer: Przycisk do pobrania raportu
+                csv = raport_df.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="📥 Pobierz raport (CSV)",
+                    data=csv,
+                    file_name='raport_kampanii.csv',
+                    mime='text/csv',
+                )
+
+                st.session_state['sms_preview'] = None
 
