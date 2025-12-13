@@ -21,8 +21,8 @@ if 'sms_preview' not in st.session_state: st.session_state['sms_preview'] = None
 if 'preview_client' not in st.session_state: st.session_state['preview_client'] = None
 if 'campaign_goal' not in st.session_state: st.session_state['campaign_goal'] = ""
 if 'salon_name' not in st.session_state: st.session_state['salon_name'] = ""
-# Nowa zmienna do trzymania stanu tabeli SMS
-if 'sms_selection_df' not in st.session_state: st.session_state['sms_selection_df'] = None
+# Zmienna do trzymania tabeli SMS (żeby nie odświeżała się niepotrzebnie)
+if 'sms_editor_df' not in st.session_state: st.session_state['sms_editor_df'] = None
 
 # ========================================================
 # 1. EKRAN LOGOWANIA I REJESTRACJI
@@ -114,7 +114,7 @@ with st.sidebar:
         db.logout_user()
         st.session_state['user'] = None
         st.session_state['salon_name'] = ""
-        st.session_state['sms_selection_df'] = None # Czyścimy wybór przy wylogowaniu
+        st.session_state['sms_editor_df'] = None
         st.rerun()
     st.divider()
 
@@ -186,6 +186,8 @@ if page == "📂 Baza Klientek":
                             
                             if added > 0:
                                 st.success(f"✅ Pomyślnie dodano {added} kontaktów!")
+                                # Resetujemy cache SMS żeby nowi klienci się pojawili
+                                st.session_state['sms_editor_df'] = None 
                             
                             if errors:
                                 st.error(f"⚠️ Błędy przy {len(errors)} osobach:")
@@ -249,6 +251,8 @@ if page == "📂 Baza Klientek":
                     
                     if success:
                         st.success(f"✅ Zapisano pomyślnie!")
+                        # Resetujemy cache SMS
+                        st.session_state['sms_editor_df'] = None 
                         time.sleep(1)
                         st.rerun()
                     else:
@@ -268,6 +272,7 @@ if page == "📂 Baza Klientek":
                 to_del = st.selectbox("Wybierz osobę do usunięcia:", options=opts.keys(), format_func=lambda x: opts[x])
                 if st.button("Usuń wybraną trwale"):
                     db.delete_client(to_del, SALON_ID)
+                    st.session_state['sms_editor_df'] = None
                     st.rerun()
             else:
                 st.write("Brak zapisanych klientek do usunięcia.")
@@ -280,9 +285,10 @@ if page == "📂 Baza Klientek":
 elif page == "🤖 Automat SMS":
     st.header("Generator SMS AI")
     
-    df = db.get_clients(SALON_ID)
+    # 1. Pobieramy dane z bazy (świeże)
+    clients_from_db = db.get_clients(SALON_ID)
     
-    if df.empty:
+    if clients_from_db.empty:
         st.warning("Najpierw dodaj klientki w bazie (zakładka Baza Klientek)!")
     else:
         c1, c2 = st.columns(2)
@@ -305,29 +311,31 @@ elif page == "🤖 Automat SMS":
         st.write("---")
         st.subheader("3. Wybierz Odbiorców")
         
-        # LOGIKA PRZYCISKÓW "ZAZNACZ WSZYSTKICH"
-        # 1. Sprawdzamy, czy dane w sesji są aktualne (np. czy nie doszedł nowy klient)
-        # Jeśli nie mamy danych w sesji LUB liczba wierszy się różni -> inicjalizujemy od nowa
-        if st.session_state['sms_selection_df'] is None or len(st.session_state['sms_selection_df']) != len(df):
-             temp_df = df.copy()
-             temp_df.insert(0, "Wybierz", False)
-             st.session_state['sms_selection_df'] = temp_df
+        # 1. Inicjalizacja stanu tabeli SMS (tylko raz lub gdy zmieni się liczba klientów)
+        if st.session_state['sms_editor_df'] is None or len(st.session_state['sms_editor_df']) != len(clients_from_db):
+             temp_df = clients_from_db.copy()
+             temp_df.insert(0, "Wybierz", False) # Domyślnie nikt nie jest wybrany
+             st.session_state['sms_editor_df'] = temp_df
 
-        # 2. Przyciski sterujące
+        # 2. Definicje funkcji (Callbacks) - to klucz do płynności!
+        def select_all_callback():
+            st.session_state['sms_editor_df']['Wybierz'] = True
+        
+        def deselect_all_callback():
+            st.session_state['sms_editor_df']['Wybierz'] = False
+
+        # 3. Przyciski sterujące z użyciem CALLBACKÓW
         col_all, col_none, col_space = st.columns([1, 1, 3])
         
-        if col_all.button("✅ Zaznacz wszystkich"):
-             st.session_state['sms_selection_df']["Wybierz"] = True
-             st.rerun()
+        # on_click wykonuje się ZANIM tabela się narysuje, więc jest super szybko
+        col_all.button("✅ Zaznacz wszystkich", on_click=select_all_callback)
+        col_none.button("❌ Odznacz wszystkich", on_click=deselect_all_callback)
 
-        if col_none.button("❌ Odznacz wszystkich"):
-             st.session_state['sms_selection_df']["Wybierz"] = False
-             st.rerun()
-
-        # 3. Wyświetlanie tabeli pobieranej Z SESJI
-        edited_selection = st.data_editor(
-            st.session_state['sms_selection_df'],
-            key="sms_selector_table",
+        # 4. Wyświetlanie tabeli (Edytor)
+        # Kluczowe: Przypisujemy wynik st.data_editor z powrotem do session_state
+        st.session_state['sms_editor_df'] = st.data_editor(
+            st.session_state['sms_editor_df'],
+            key="sms_selector_table_fixed", # Stały klucz, żeby nie gubić stanu
             height=400,
             use_container_width=True,
             hide_index=True,
@@ -336,18 +344,13 @@ elif page == "🤖 Automat SMS":
                 "imie": st.column_config.TextColumn("Klientka", disabled=True),
                 "telefon": st.column_config.TextColumn("Telefon", disabled=True),
                 "ostatni_zabieg": st.column_config.TextColumn("Ostatni Zabieg", disabled=True),
-                "id": None,
-                "salon_id": None,
-                "user_id": None,
-                "created_at": None,
-                "data_wizyty": None
+                "id": None, "salon_id": None, "user_id": None, "created_at": None, "data_wizyty": None
             }
         )
-        
-        # 4. Aktualizacja stanu w sesji (żeby zapamiętał ręczne kliknięcia)
-        st.session_state['sms_selection_df'] = edited_selection
 
-        target_df = edited_selection[edited_selection["Wybierz"] == True]
+        # 5. Pobieramy zaznaczonych
+        current_df = st.session_state['sms_editor_df']
+        target_df = current_df[current_df["Wybierz"] == True]
 
         if not target_df.empty:
             st.info(f"✅ Wybrano odbiorców: **{len(target_df)}**")
