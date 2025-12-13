@@ -70,7 +70,6 @@ st.title("Panel Salonu")
 page = st.sidebar.radio("Menu", ["📂 Baza Klientek", "🤖 Automat SMS"])
 
 # --- ZAKŁADKA: BAZA KLIENTEK ---
-# --- ZAKŁADKA: BAZA KLIENTEK ---
 if page == "📂 Baza Klientek":
     st.header("Twoja Baza")
 
@@ -137,6 +136,38 @@ if page == "📂 Baza Klientek":
                             st.rerun()
                 else:
                     st.error("Nie rozpoznano kolumn Imię/Telefon w pliku.")
+# --- NOWA SEKCJA: DODAWANIE RĘCZNE ---
+    with st.expander("➕ DODAJ RĘCZNIE (Pojedynczo)", expanded=False):
+        with st.form("manual_add_form"):
+            c1, c2 = st.columns(2)
+            f_imie = c1.text_input("Imię i Nazwisko")
+            f_tel = c2.text_input("Telefon")
+            
+            c3, c4 = st.columns(2)
+            f_zabieg = c3.text_input("Ostatni zabieg", value="Manicure")
+            f_data = c4.date_input("Data wizyty", value=None)
+            
+            submitted = st.form_submit_button("💾 Zapisz klientkę")
+            
+            if submitted:
+                if f_imie and f_tel:
+                    # Wywołanie funkcji z database.py
+                    success, msg = db.add_client(
+                        SALON_ID, 
+                        f_imie, 
+                        f_tel, 
+                        f_zabieg, 
+                        f_data
+                    )
+                    
+                    if success:
+                        st.success(f"✅ Dodano: {f_imie}")
+                        time.sleep(1)
+                        st.rerun() # Odśwież stronę, żeby zobaczyć nową osobę w tabeli
+                    else:
+                        st.error(f"Błąd bazy: {msg}")
+                else:
+                    st.warning("⚠️ Imię i Telefon są wymagane!")
 
     # Tabela wyświetlania bazy (poza expanderem)
     df = db.get_clients(SALON_ID)
@@ -222,4 +253,5 @@ elif page == "🤖 Automat SMS":
                 )
 
                 st.session_state['sms_preview'] = None
+
 
