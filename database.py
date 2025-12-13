@@ -78,3 +78,32 @@ def reset_password_email(email):
         return True, "Link wysłany! Sprawdź email."
     except Exception as e:
         return False, str(e)
+# --- ZARZĄDZANIE PROFILEM ---
+
+def get_salon_name(user_id):
+    """Pobiera nazwę salonu dla zalogowanego użytkownika"""
+    try:
+        # Pobieramy wiersz z tabeli profiles gdzie id = user_id
+        res = supabase.table("profiles").select("nazwa_salonu").eq("id", user_id).execute()
+        
+        # Jeśli coś znalazło, zwracamy nazwę
+        if res.data and len(res.data) > 0:
+            return res.data[0].get("nazwa_salonu", "")
+        else:
+            return ""
+    except Exception as e:
+        return ""
+
+def update_salon_name(user_id, new_name):
+    """Aktualizuje lub tworzy wpis z nazwą salonu"""
+    try:
+        # Używamy 'upsert' (update lub insert)
+        data = {
+            "id": user_id,
+            "nazwa_salonu": new_name
+        }
+        supabase.table("profiles").upsert(data).execute()
+        return True
+    except Exception as e:
+        st.error(f"Błąd zapisu profilu: {e}")
+        return False
