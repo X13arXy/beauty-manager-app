@@ -260,19 +260,7 @@ if page == "📂 Baza Klientek":
     with col_info:
         st.caption("ℹ️ **Instrukcja:** Aby dodać osobę, kliknij wiersz na dole tabeli (lub ikonę `+`). Wpisz dane i kliknij **Zapisz zmiany**.")
 
-    with st.expander("🗑️ Usuwanie klientek"):
-        if not df.empty and "imie" in df.columns and "id" in df.columns:
-            valid_rows = df.dropna(subset=['id'])
-            if not valid_rows.empty:
-                opts = valid_rows.set_index('id')['imie'].to_dict()
-                to_del = st.selectbox("Wybierz osobę do usunięcia:", options=opts.keys(), format_func=lambda x: opts[x])
-                if st.button("Usuń wybraną trwale"):
-                    db.delete_client(to_del, SALON_ID)
-                    st.rerun()
-            else:
-                st.write("Brak zapisanych klientek do usunięcia.")
-        else:
-            st.write("Brak danych do usunięcia.")
+    
 
 # ========================================================
 # ZAKŁADKA: AUTOMAT SMS
@@ -387,3 +375,4 @@ elif page == "🤖 Automat SMS":
                     mime='text/csv',
                 )
                 st.session_state['sms_preview'] = None
+
