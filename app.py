@@ -183,7 +183,16 @@ if page == "📂 Baza Klientek":
                                 else:
                                     errors.append(f"{row['Imię']}: {msg}")
                                 
-                                prog_bar.progress((idx + 1) / count)
+                               # --- POPRAWKA ---
+                            if count > 0:
+                                progress_val = (idx + 1) / count
+                                # Zabezpieczenie: jeśli wynik wyjdzie > 1.0, ustawiamy na 1.0
+                            if progress_val > 1.0:
+                                    progress_val = 1.0
+                                prog_bar.progress(progress_val)
+                            else:
+                                # Jeśli nie ma elementów do przeliczenia, ustawiamy pasek na 100% od razu
+                                prog_bar.progress(1.0)
                             
                             if added > 0:
                                 st.success(f"✅ Pomyślnie dodano {added} kontaktów!")
@@ -375,4 +384,5 @@ elif page == "🤖 Automat SMS":
                     mime='text/csv',
                 )
                 st.session_state['sms_preview'] = None
+
 
