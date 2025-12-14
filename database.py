@@ -49,11 +49,12 @@ def logout_user():
 # --- OPERACJE NA DANYCH (CRUD) ---
 
 # To jest ta poprawiona funkcja, o którą prosiłeś:
-def add_client(salon_id, imie, telefon, zabieg, data):
+def add_client(salon_id, imie, telefon, zabieg, data, kierunkowy="48"):
     # Czyścimy numer telefonu z myślników i spacji
     clean_tel = ''.join(filter(str.isdigit, str(telefon)))
+    clean_kier = ''.join(filter(str.isdigit, str(kierunkowy)))
     
-    # Tu jest Twój FIX na daty (None zamiast pustego stringa)
+    # Fix na daty
     data_val = str(data) if data and str(data).strip() != "" else None
     
     try:
@@ -61,6 +62,7 @@ def add_client(salon_id, imie, telefon, zabieg, data):
             "salon_id": salon_id, 
             "imie": str(imie), 
             "telefon": clean_tel,
+            "kierunkowy": clean_kier,  # <--- NOWE POLE
             "ostatni_zabieg": str(zabieg), 
             "data_wizyty": data_val
         }).execute()
