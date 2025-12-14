@@ -153,40 +153,49 @@ with tabs[0]:
                     else:
                         st.error("Nie znaleziono kolumn 'Imię' i 'Telefon' w pliku.")
 
-    # --- C. TABELA ---
+    # --- C. TABELA (NAPRAWIONE: CHECKBOXY + GUZIK USUŃ) ---
     st.divider()
     st.subheader("Lista Klientek")
     
     df = db.get_clients(SALON_ID)
     
     if not df.empty:
+        # Sortowanie kolumn
         cols = ['id', 'imie', 'telefon', 'ostatni_zabieg']
         df = df[[c for c in cols if c in df.columns]]
+        
+        # Dodajemy kolumnę "Usuń" na początek
+        df.insert(0, "Usuń", False)
 
-        st.dataframe(
-            df, 
-            use_container_width=True, 
+        # Edytor z Checkboxami
+        edited_table = st.data_editor(
+            df,
+            key="main_client_table",
+            num_rows="fixed",
+            use_container_width=True,
             hide_index=True,
             column_config={
-                "id": st.column_config.TextColumn("ID", width="small"),
+                "Usuń": st.column_config.CheckboxColumn("Zaznacz", default=False, width="small"),
+                "id": None, # Ukrywamy ID, bo użytkownik nie musi go widzieć
                 "imie": "Imię i Nazwisko",
                 "telefon": "Telefon",
                 "ostatni_zabieg": "Ostatni Zabieg"
-            }
+            },
+            disabled=["imie", "telefon", "ostatni_zabieg"] # Blokujemy edycję tekstu w tabeli (tylko checkboxy)
         )
         
-        with st.expander("🗑️ Usuwanie"):
-            col_del1, col_del2 = st.columns([3, 1])
-            id_to_del = col_del1.text_input("Wpisz ID osoby do usunięcia:")
-            if col_del2.button("Usuń"):
-                if id_to_del:
-                    if str(id_to_del) in df['id'].astype(str).values:
-                        db.delete_clients_by_ids([int(id_to_del)], SALON_ID)
-                        st.success("Usunięto!")
-                        time.sleep(0.5)
-                        st.rerun()
-                    else:
-                        st.error("Brak takiego ID.")
+        # Logika usuwania zaznaczonych
+        rows_to_delete = edited_table[edited_table["Usuń"] == True]
+        
+        if not rows_to_delete.empty:
+            st.warning(f"Zaznaczono {len(rows_to_delete)} osób do usunięcia.")
+            if st.button("🗑️ USUŃ ZAZNACZONE", type="primary"):
+                ids_to_del = rows_to_delete["id"].tolist()
+                db.delete_clients_by_ids(ids_to_del, SALON_ID)
+                st.success("Usunięto pomyślnie!")
+                time.sleep(0.5)
+                st.rerun()
+
     else:
         st.info("Baza jest pusta. Dodaj kogoś powyżej.")
 
@@ -201,6 +210,7 @@ with tabs[1]:
     if df_sms.empty:
         st.warning("Najpierw dodaj klientki w zakładce Baza!")
     else:
+        # 1. WYBÓR ODBIORCÓW
         st.subheader("Krok 1: Wybierz Odbiorców")
         
         c_all, c_none = st.columns([1, 5])
@@ -229,6 +239,7 @@ with tabs[1]:
         if count > 0:
             st.success(f"Wybrano: {count} osób")
             
+            # 2. TREŚĆ I AI
             st.divider()
             st.subheader("Krok 2: Treść Wiadomości")
             
@@ -252,6 +263,7 @@ with tabs[1]:
                 else:
                     st.warning("Wpisz cel kampanii.")
 
+            # 3. PODGLĄD I WYSYŁKA
             if st.session_state['sms_preview']:
                 st.divider()
                 st.subheader("Krok 3: Weryfikacja i Wysyłka")
@@ -263,7 +275,6 @@ with tabs[1]:
                 )
                 st.session_state['sms_preview'] = final_content
                 
-                # POPRAWIONA LINIA Z BŁĘDU:
                 st.caption("ℹ️ Znacznik {imie} zostanie zamieniony na imię klientki.")
 
                 col_test, col_real = st.columns(2)
