@@ -14,7 +14,6 @@ def init_ai():
     try:
         if "GOOGLE_API_KEY" in st.secrets:
             genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
-            # Używamy wersji stabilnej
             return genai.GenerativeModel('gemini-2.0-flash')
         else:
             return None
@@ -26,8 +25,8 @@ model = init_ai()
 
 # --- FUNKCJE POMOCNICZE ---
 def usun_ogonki(tekst):
-    if not isinstance(tekst, str):
-        return ""
+    """Zamienia polskie znaki na łacińskie, by oszczędzać na SMSach"""
+    if not isinstance(tekst, str): return ""
     mapa = {'ą': 'a', 'ć': 'c', 'ę': 'e', 'ł': 'l', 'ń': 'n', 'ó': 'o', 'ś': 's', 'ź': 'z', 'ż': 'z',
             'Ą': 'A', 'Ć': 'C', 'Ę': 'E', 'Ł': 'L', 'Ń': 'N', 'Ó': 'O', 'Ś': 'S', 'Ź': 'Z', 'Ż': 'Z'}
     for pl, latin in mapa.items():
@@ -54,6 +53,7 @@ def parse_vcf(file_content):
         elif line.startswith("TEL"): 
             if "Telefon" not in current_contact: 
                 number = line.split(":", 1)[1]
+                # Czyścimy numer
                 clean_number = ''.join(filter(str.isdigit, number))
                 if len(clean_number) > 9 and clean_number.startswith("48"): pass
                 elif len(clean_number) == 9: clean_number = "48" + clean_number 
@@ -67,8 +67,6 @@ def parse_vcf(file_content):
 
 # --- LOGIKA GENEROWANIA I WYSYŁKI ---
 
-# Wklej to do services.py, zastępując starą funkcję generate_sms_content
-
 def generate_sms_content(salon_name, client_data, campaign_goal, generate_template=False):
     """
     Generuje treść SMS. 
@@ -78,9 +76,6 @@ def generate_sms_content(salon_name, client_data, campaign_goal, generate_templa
     # Dane do promptu (dla szablonu używamy generycznych)
     imie = "{imie}" if generate_template else client_data.get('imie', 'Klientko')
     
-    # Zabezpieczenie przed brakiem klucza 'ostatni_zabieg'
-    ostatni_zabieg = "Poprzedni Zabieg" if generate_template else client_data.get('ostatni_zabieg', 'nieznany')
-
     if not model: 
         return usun_ogonki(f"Hej {imie}, zapraszamy do {salon_name}!")
     
@@ -106,61 +101,71 @@ def generate_sms_content(salon_name, client_data, campaign_goal, generate_templa
         return usun_ogonki(text)
     except Exception as e:
         return f"BLAD AI: {str(e)}"
+
 def send_sms_via_api(phone, message):
     """Wysyła SMS przez bramkę SMSAPI"""
     token = st.secrets.get("SMSAPI_TOKEN", "")
-    if not token: return False, "Brak tokenu"
+    
+    if not token: 
+        return False, "Brak Tokenu SMSAPI"
     
     try:
         client = SmsApiPlClient(access_token=token)
-        client.sms.send(to=str(phone), message=message)
+        # 'Eco' to domyślny nadawca testowy, w produkcji zmienisz na nazwę salonu
+        client.sms.send(to=str(phone), message=message, from_="Eco") 
         return True, "OK"
     except Exception as e:
         return False, str(e)
 
-def send_campaign_logic(target_df, campaign_goal, template_content, is_test, progress_bar, preview_client_name, salon_name):
+# --- TO JEST FUNKCJA, KTÓRA POWODOWAŁA BŁĄD (Teraz jest naprawiona) ---
+def send_campaign_logic(target_df, template_content, is_test, progress_bar, salon_name):
     """
-    Logika pętli wysyłkowej z RAPORTOWANIEM.
-    Zwraca DataFrame z podsumowaniem wysyłki.
+    Logika wysyłki oparta na SZABLONIE.
+    Przyjmuje 5 argumentów (dopasowane do nowego app.py).
     """
     total = len(target_df)
     status_box = st.empty()
-    
-    # Lista, do której będziemy zbierać wyniki
     raport_lista = []
     
     for i, (index, row) in enumerate(target_df.iterrows()):
-        imie = row.get('imie', row.get('Imię', 'Klientko'))
-        telefon = row.get('telefon', row.get('Telefon'))
         
-        # 1. Generowanie (AI)
-        final_msg = generate_sms_content(salon_name, row, campaign_goal)
-        time.sleep(1.0) 
+        # 1. Pobieramy dane
+        imie_klientki = row.get('imie', 'Klientko')
+        # Składamy numer (full_phone może być w row, a jak nie to składamy tutaj)
+        telefon = row.get('full_phone')
+        if not telefon:
+             kier = row.get('kierunkowy', '48')
+             tel_base = row.get('telefon', '')
+             telefon = str(kier) + str(tel_base)
+        
+        # 2. Podmieniamy zmienną w szablonie
+        try:
+            final_msg = template_content.replace("{imie}", str(imie_klientki))
+        except:
+            final_msg = template_content
 
-        # 2. Wysyłka / Symulacja
+        # 3. Wysyłka / Symulacja
         if is_test:
             status_text = "🧪 Test (Symulacja)"
-            status_box.info(f"[{i+1}/{total}] Generuję dla: {imie}...\nAI: {final_msg}")
+            status_box.info(f"[{i+1}/{total}] Symulacja dla: {imie_klientki}")
+            time.sleep(0.1) 
         else:
             success, info = send_sms_via_api(telefon, final_msg)
             status_text = "✅ Wysłano" if success else f"❌ Błąd: {info}"
-            status_box.text(f"[{i+1}/{total}] Wysłano do: {imie}")
-            time.sleep(0.2)
-
-        # 3. Dodajemy do raportu
+            status_box.text(f"[{i+1}/{total}] Przetwarzanie: {imie_klientki}...")
+        
+        # 4. Raport
         raport_lista.append({
-            "Imię": imie,
+            "Imię": imie_klientki,
             "Telefon": telefon,
             "Treść SMS": final_msg,
             "Status": status_text
         })
 
         # Pasek postępu
-        current_progress = (i + 1) / total
-        if current_progress > 1.0: current_progress = 1.0
-        progress_bar.progress(current_progress)
+        if total > 0:
+            prog_val = (i + 1) / total
+            progress_bar.progress(min(prog_val, 1.0))
 
-    status_box.success("Kampania zakończona!")
-    
-    # Zwracamy tabelę z wynikami
+    status_box.success("🎉 Kampania zakończona!")
     return pd.DataFrame(raport_lista)
