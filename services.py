@@ -95,6 +95,7 @@ def generate_sms_content(salon_name, client_data, campaign_goal):
     2. Bez polskich znaków (usuń ogonki).
     3. Podpisz się: {salon_name}.
     4. Max 150 znaków.
+    5. Bez emoji. 
     """
     
     try:
