@@ -84,7 +84,7 @@ tabs = st.tabs(["📂 Baza Klientek", "🤖 Automat SMS"])
 with tabs[0]:
     col_add, col_import = st.columns(2)
 
-    # --- A. FORMULARZ RĘCZNY (To o co prosiłeś) ---
+    # --- A. FORMULARZ RĘCZNY ---
     with col_add:
         with st.expander("➕ Dodaj Klientkę (Ręcznie)", expanded=True):
             with st.form("add_single_client"):
@@ -103,13 +103,12 @@ with tabs[0]:
                     else:
                         st.warning("Podaj imię i telefon.")
 
-    # --- B. IMPORT PLIKU (Przywrócone działanie!) ---
+    # --- B. IMPORT PLIKU ---
     with col_import:
         with st.expander("📥 Import z pliku (Excel/VCF)"):
             uploaded_file = st.file_uploader("Wgraj plik", type=['xlsx', 'csv', 'vcf'])
             
             if uploaded_file:
-                # Logika parsowania pliku
                 df_import = None
                 if uploaded_file.name.endswith('.vcf'):
                     df_import = srv.parse_vcf(uploaded_file.getvalue())
@@ -119,15 +118,11 @@ with tabs[0]:
                     df_import = pd.read_excel(uploaded_file)
                 
                 if df_import is not None and not df_import.empty:
-                    # Normalizacja kolumn (wszystko na małe litery)
                     df_import.columns = [c.lower() for c in df_import.columns]
-                    
-                    # Szukanie odpowiednich kolumn
                     col_imie = next((c for c in df_import.columns if 'imi' in c or 'name' in c), None)
                     col_tel = next((c for c in df_import.columns if 'tel' in c or 'num' in c), None)
 
                     if col_imie and col_tel:
-                        # Prezentacja danych do importu
                         df_to_show = pd.DataFrame({
                             "Dodaj": True, 
                             "Imię": df_import[col_imie],
@@ -146,16 +141,9 @@ with tabs[0]:
                             else:
                                 prog_bar = st.progress(0.0)
                                 added_count = 0
-                                
                                 for idx, row in to_import.iterrows():
                                     tel_raw = str(row["Telefon"])
-                                    success, _ = db.add_client(
-                                        SALON_ID, 
-                                        str(row["Imię"]), 
-                                        tel_raw, 
-                                        str(row["Zabieg"]), 
-                                        None
-                                    )
+                                    success, _ = db.add_client(SALON_ID, str(row["Imię"]), tel_raw, str(row["Zabieg"]), None)
                                     if success: added_count += 1
                                     prog_bar.progress(min((idx + 1) / len(to_import), 1.0))
                                 
@@ -165,7 +153,7 @@ with tabs[0]:
                     else:
                         st.error("Nie znaleziono kolumn 'Imię' i 'Telefon' w pliku.")
 
-    # --- C. TABELA (Przeglądanie i Usuwanie) ---
+    # --- C. TABELA ---
     st.divider()
     st.subheader("Lista Klientek")
     
@@ -187,20 +175,18 @@ with tabs[0]:
             }
         )
         
-        # Proste usuwanie po ID
         with st.expander("🗑️ Usuwanie"):
             col_del1, col_del2 = st.columns([3, 1])
             id_to_del = col_del1.text_input("Wpisz ID osoby do usunięcia:")
             if col_del2.button("Usuń"):
                 if id_to_del:
-                    # Sprawdzamy czy to ID istnieje w danych (bezpieczeństwo)
                     if str(id_to_del) in df['id'].astype(str).values:
                         db.delete_clients_by_ids([int(id_to_del)], SALON_ID)
                         st.success("Usunięto!")
                         time.sleep(0.5)
                         st.rerun()
                     else:
-                        st.error("Brak takiego ID na liście.")
+                        st.error("Brak takiego ID.")
     else:
         st.info("Baza jest pusta. Dodaj kogoś powyżej.")
 
@@ -215,7 +201,6 @@ with tabs[1]:
     if df_sms.empty:
         st.warning("Najpierw dodaj klientki w zakładce Baza!")
     else:
-        # 1. WYBÓR ODBIORCÓW
         st.subheader("Krok 1: Wybierz Odbiorców")
         
         c_all, c_none = st.columns([1, 5])
@@ -244,7 +229,6 @@ with tabs[1]:
         if count > 0:
             st.success(f"Wybrano: {count} osób")
             
-            # 2. TREŚĆ I AI
             st.divider()
             st.subheader("Krok 2: Treść Wiadomości")
             
@@ -268,7 +252,6 @@ with tabs[1]:
                 else:
                     st.warning("Wpisz cel kampanii.")
 
-            # 3. PODGLĄD I WYSYŁKA
             if st.session_state['sms_preview']:
                 st.divider()
                 st.subheader("Krok 3: Weryfikacja i Wysyłka")
@@ -280,4 +263,42 @@ with tabs[1]:
                 )
                 st.session_state['sms_preview'] = final_content
                 
-                st.caption("ℹ️ Znacznik `{imie}
+                # POPRAWIONA LINIA Z BŁĘDU:
+                st.caption("ℹ️ Znacznik {imie} zostanie zamieniony na imię klientki.")
+
+                col_test, col_real = st.columns(2)
+                
+                with col_test:
+                    if st.button("🧪 Wyślij TEST (Symulacja)", use_container_width=True):
+                        sending_df = targets.copy()
+                        if 'kierunkowy' not in sending_df.columns: sending_df['kierunkowy'] = '48'
+                        sending_df['full_phone'] = sending_df['kierunkowy'] + sending_df['telefon']
+                        
+                        report = srv.send_campaign_logic(
+                            sending_df,
+                            final_content,
+                            is_test=True,
+                            progress_bar=st.progress(0.0),
+                            salon_name=st.session_state['salon_name']
+                        )
+                        st.dataframe(report)
+
+                with col_real:
+                    if st.button("🚀 Wyślij WSZYSTKIM (Płatne)", type="primary", use_container_width=True):
+                        with st.status("Wysyłanie..."):
+                            sending_df = targets.copy()
+                            if 'kierunkowy' not in sending_df.columns: sending_df['kierunkowy'] = '48'
+                            sending_df['full_phone'] = sending_df['kierunkowy'] + sending_df['telefon']
+                            
+                            report = srv.send_campaign_logic(
+                                sending_df,
+                                final_content,
+                                is_test=False,
+                                progress_bar=st.progress(0.0),
+                                salon_name=st.session_state['salon_name']
+                            )
+                        st.success("Wysłano!")
+                        st.dataframe(report)
+
+        else:
+            st.info("Zaznacz przynajmniej jedną osobę w tabeli powyżej.")
