@@ -214,6 +214,33 @@ if page == "📂 Baza Klientek":
     
     df = db.get_clients(SALON_ID)
     
+    # =========================================================
+    # --- FIX WIZUALNY: USUWANIE NAWIASÓW ['...'] ---
+    # Ten kod wyczyści dane przed wyświetleniem
+    # =========================================================
+    def clean_brackets(val):
+        # 1. Jeśli to prawdziwa lista pythonowa: ['Tekst'] -> 'Tekst'
+        if isinstance(val, list):
+            return val[0] if len(val) > 0 else ""
+        
+        # 2. Jeśli to napis wyglądający jak lista: "['Tekst']" -> 'Tekst'
+        if isinstance(val, str):
+            val = val.strip()
+            # Usuwamy nawiasy i cudzysłowy, jeśli są na początku i końcu
+            if val.startswith("['") and val.endswith("']"):
+                return val[2:-2]
+            if val.startswith('["') and val.endswith('"]'):
+                return val[2:-2]
+        return val
+
+    # Zastosuj czyszczenie do kolumn, które tego wymagają
+    if not df.empty:
+        cols_to_clean = ['imie', 'telefon', 'ostatni_zabieg']
+        for col in cols_to_clean:
+            if col in df.columns:
+                df[col] = df[col].apply(clean_brackets)
+    # =========================================================
+
     if df.empty:
         df = pd.DataFrame(columns=["id", "salon_id", "imie", "telefon", "ostatni_zabieg", "data_wizyty"])
 
@@ -410,4 +437,5 @@ elif page == "🤖 Automat SMS":
                     mime='text/csv',
                 )
                 st.session_state['sms_preview'] = None
+
 
