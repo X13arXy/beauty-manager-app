@@ -3,11 +3,11 @@ import google.generativeai as genai
 import pandas as pd
 import time
 
-# --- IMPORT BIBLIOTEKI SMS (POPRAWIONY) ---
+# --- IMPORT BIBLIOTEKI SMS ---
 try:
     from smsapi.client import SmsApiPlClient
 except ImportError:
-    SmsApiPlClient = None  # Ustawiamy na None, żeby program się nie wywalił od razu
+    SmsApiPlClient = None 
 
 # --- KONFIGURACJA AI ---
 def init_ai():
@@ -115,6 +115,9 @@ def send_sms_via_api(phone, message):
     
     try:
         client = SmsApiPlClient(access_token=token)
+        # --- POPRAWKA TUTAJ ---
+        # Ustawiamy from_="Eco" na sztywno. To naprawia błąd 110.
+        # Nawet jeśli masz PRO, "Eco" zawsze przejdzie (jako losowy numer/Info).
         client.sms.send(to=str(phone), message=message, from_="Eco") 
         return True, "OK"
     except Exception as e:
