@@ -103,7 +103,7 @@ with tabs[0]:
                     else:
                         st.warning("Podaj imię i telefon.")
 
-    # --- B. IMPORT PLIKU ---
+    # --- B. IMPORT PLIKU (Poprawiony: "Brak" zamiast "Importowany") ---
     with col_import:
         with st.expander("📥 Import z pliku (Excel/VCF)"):
             uploaded_file = st.file_uploader("Wgraj plik", type=['xlsx', 'csv', 'vcf'])
@@ -123,14 +123,21 @@ with tabs[0]:
                     col_tel = next((c for c in df_import.columns if 'tel' in c or 'num' in c), None)
 
                     if col_imie and col_tel:
+                        # Próba znalezienia kolumny z zabiegiem
+                        col_zabieg = next((c for c in df_import.columns if 'zabieg' in c or 'usluga' in c or 'service' in c), None)
+                        
+                        # Jeśli jest kolumna - bierzemy z niej dane. Jeśli nie - wpisujemy "Brak".
+                        wartosci_zabieg = df_import[col_zabieg] if col_zabieg else "Brak"
+
                         df_to_show = pd.DataFrame({
                             "Dodaj": True, 
                             "Imię": df_import[col_imie],
                             "Telefon": df_import[col_tel].astype(str),
-                            "Zabieg": "Importowany"
+                            "Zabieg": wartosci_zabieg 
                         })
                         
-                        st.info("Zaznacz osoby do importu:")
+                        st.info("Sprawdź dane. Możesz edytować tabelę poniżej przed zapisem.")
+                        
                         edited_import = st.data_editor(df_to_show, hide_index=True, use_container_width=True)
                         
                         if st.button(f"💾 Zapisz zaznaczone"):
@@ -266,7 +273,7 @@ with tabs[1]:
         if count > 0:
             st.success(f"Wybrano: {count} osób")
             
-            # 2. TREŚĆ I AI
+            # 2. TREŚĆ I STRATEGIA
             st.divider()
             st.subheader("Krok 2: Treść i Strategia")
             
@@ -278,7 +285,7 @@ with tabs[1]:
             goal = st.text_area("Cel wiadomości:", value=st.session_state['campaign_goal'])
             st.session_state['campaign_goal'] = goal
 
-            # --- NOWOŚĆ: WYBÓR TRYBU ---
+            # WYBÓR TRYBU
             mode_type = st.radio(
                 "Wybierz styl wysyłki:", 
                 ["📝 Jeden Szablon (Szybko i bezpiecznie)", "✨ Unikalne wiadomości (AI pisze dla każdej osoby osobno)"]
@@ -287,7 +294,7 @@ with tabs[1]:
             
             if st.button("✨ GENERUJ PODGLĄD", type="primary"):
                 if goal:
-                    # Generujemy podgląd. Jeśli tryb unikalny, generujemy tylko przykład.
+                    # Generujemy podgląd. Jeśli tryb unikalny, generujemy przykład.
                     content = srv.generate_sms_content(
                         st.session_state['salon_name'], 
                         {}, 
@@ -298,13 +305,13 @@ with tabs[1]:
                 else:
                     st.warning("Wpisz cel kampanii.")
 
-            # 3. PODGLĄD I WYSYŁKA
+            # 3. WYSYŁKA
             if st.session_state['sms_preview']:
                 st.divider()
                 st.subheader("Krok 3: Weryfikacja i Wysyłka")
                 
                 if use_unique_mode:
-                    st.info("💡 W trybie UNIKALNYM AI wygeneruje inną treść dla każdej osoby podczas wysyłki. Poniżej tylko przykład stylu.")
+                    st.info("💡 W trybie UNIKALNYM AI wygeneruje inną treść dla każdej osoby. Poniżej tylko przykład stylu.")
                 
                 final_content = st.text_area(
                     "Podgląd / Treść:", 
@@ -324,11 +331,11 @@ with tabs[1]:
                         report = srv.send_campaign_logic(
                             sending_df,
                             final_content, 
-                            st.session_state['campaign_goal'], # Przekazujemy cel dla trybu unikalnego
+                            st.session_state['campaign_goal'], 
                             is_test=True,
                             progress_bar=st.progress(0.0),
                             salon_name=st.session_state['salon_name'],
-                            unique_mode=use_unique_mode # Przekazujemy tryb
+                            unique_mode=use_unique_mode
                         )
                         st.dataframe(report)
 
