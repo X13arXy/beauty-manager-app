@@ -134,3 +134,16 @@ def update_clients_bulk(data_list):
         return True, "Zapisano pomyślnie!"
     except Exception as e:
         return False, str(e)
+# Wklej to na końcu pliku database.py
+
+def delete_clients_by_ids(id_list, salon_id):
+    """Usuwa listę klientek po ich ID"""
+    try:
+        if not id_list:
+            return True
+        # Usuwamy tylko te ID, które należą do danego salonu (bezpieczeństwo)
+        supabase.table("klientki").delete().in_("id", id_list).eq("salon_id", salon_id).execute()
+        return True
+    except Exception as e:
+        print(f"Błąd usuwania: {e}")
+        return False
