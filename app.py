@@ -169,7 +169,7 @@ with tabs[0]:
 
         st.caption("📝 Kliknij w imię/telefon, żeby edytować. Zaznacz 'Usuń', żeby skasować.")
         
-        # Edytor - TERAZ MOŻNA EDYTOWAĆ WSZYSTKO (oprócz ID)
+        # Edytor - EDYCJA I CHECKBOXY
         edited_table = st.data_editor(
             df,
             key="main_client_table",
@@ -183,7 +183,6 @@ with tabs[0]:
                 "telefon": st.column_config.TextColumn("Telefon", required=True),
                 "ostatni_zabieg": "Ostatni Zabieg"
             }
-            # USUNĄŁEM BLOKADĘ "disabled" - teraz można pisać!
         )
         
         # PRZYCISK ZAPISU (OBSŁUGUJE I EDYCJĘ I USUWANIE)
@@ -204,17 +203,14 @@ with tabs[0]:
 
                 # B. AKTUALIZACJA (EDYCJA)
                 if not to_update.empty:
-                    # Konwertujemy na listę słowników dla bazy
-                    # Musimy usunąć kolumnę "Usuń", bo nie ma jej w bazie
                     data_to_upsert = []
                     
                     for index, row in to_update.iterrows():
-                        # Porównujemy czy dane się zmieniły (opcjonalne, ale tutaj ślemy wszystko dla pewności)
                         clean_row = {
-                            "id": row["id"], # Ważne dla aktualizacji!
+                            "id": row["id"], 
                             "salon_id": SALON_ID,
                             "imie": row["imie"],
-                            "telefon": ''.join(filter(str.isdigit, str(row["telefon"]))), # Czyścimy telefon przy edycji
+                            "telefon": ''.join(filter(str.isdigit, str(row["telefon"]))), 
                             "ostatni_zabieg": row["ostatni_zabieg"]
                         }
                         data_to_upsert.append(clean_row)
@@ -247,12 +243,20 @@ with tabs[1]:
     if df_sms.empty:
         st.warning("Najpierw dodaj klientki w zakładce Baza!")
     else:
-        # 1. WYBÓR ODBIORCÓW
+        # 1. WYBÓR ODBIORCÓW (POPRAWIONE PRZYCISKI)
         st.subheader("Krok 1: Wybierz Odbiorców")
         
-        c_all, c_none = st.columns([1, 5])
-        if c_all.button("Zaznacz wszystkich"):
+        col_all, col_none, col_space = st.columns([1, 1, 3])
+        
+        # Przycisk ZAZNACZ
+        if col_all.button("✅ Zaznacz wszystkich"):
             st.session_state['sms_select_all'] = True
+            st.session_state['sms_table_key'] += 1
+            st.rerun()
+
+        # Przycisk ODZNACZ (TEGO BRAKOWAŁO)
+        if col_none.button("❌ Odznacz wszystkich"):
+            st.session_state['sms_select_all'] = False
             st.session_state['sms_table_key'] += 1
             st.rerun()
             
