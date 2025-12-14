@@ -20,7 +20,6 @@ if 'user' not in st.session_state: st.session_state['user'] = None
 if 'sms_preview' not in st.session_state: st.session_state['sms_preview'] = None
 if 'campaign_goal' not in st.session_state: st.session_state['campaign_goal'] = ""
 if 'salon_name' not in st.session_state: st.session_state['salon_name'] = ""
-# Do checkboxów
 if 'sms_table_key' not in st.session_state: st.session_state['sms_table_key'] = 0
 if 'sms_select_all' not in st.session_state: st.session_state['sms_select_all'] = False
 
@@ -85,7 +84,7 @@ tabs = st.tabs(["📂 Baza Klientek", "🤖 Automat SMS"])
 with tabs[0]:
     col_add, col_import = st.columns(2)
 
-    # --- A. FORMULARZ RĘCZNY (To, czego brakowało) ---
+    # --- A. FORMULARZ RĘCZNY (To o co prosiłeś) ---
     with col_add:
         with st.expander("➕ Dodaj Klientkę (Ręcznie)", expanded=True):
             with st.form("add_single_client"):
@@ -104,14 +103,67 @@ with tabs[0]:
                     else:
                         st.warning("Podaj imię i telefon.")
 
-    # --- B. IMPORT PLIKU ---
+    # --- B. IMPORT PLIKU (Przywrócone działanie!) ---
     with col_import:
         with st.expander("📥 Import z pliku (Excel/VCF)"):
-            uploaded = st.file_uploader("Wybierz plik", type=['xlsx', 'csv', 'vcf'])
-            if uploaded:
-                st.info("Funkcja importu dostępna (kod ukryty dla czytelności)")
-                # Tutaj możesz wkleić logikę importu z poprzedniej wersji, 
-                # jeśli chcesz jej używać. Na razie skupiamy się na ręcznym dodawaniu.
+            uploaded_file = st.file_uploader("Wgraj plik", type=['xlsx', 'csv', 'vcf'])
+            
+            if uploaded_file:
+                # Logika parsowania pliku
+                df_import = None
+                if uploaded_file.name.endswith('.vcf'):
+                    df_import = srv.parse_vcf(uploaded_file.getvalue())
+                elif uploaded_file.name.endswith('.csv'):
+                    df_import = pd.read_csv(uploaded_file)
+                else:
+                    df_import = pd.read_excel(uploaded_file)
+                
+                if df_import is not None and not df_import.empty:
+                    # Normalizacja kolumn (wszystko na małe litery)
+                    df_import.columns = [c.lower() for c in df_import.columns]
+                    
+                    # Szukanie odpowiednich kolumn
+                    col_imie = next((c for c in df_import.columns if 'imi' in c or 'name' in c), None)
+                    col_tel = next((c for c in df_import.columns if 'tel' in c or 'num' in c), None)
+
+                    if col_imie and col_tel:
+                        # Prezentacja danych do importu
+                        df_to_show = pd.DataFrame({
+                            "Dodaj": True, 
+                            "Imię": df_import[col_imie],
+                            "Telefon": df_import[col_tel].astype(str),
+                            "Zabieg": "Importowany"
+                        })
+                        
+                        st.info("Zaznacz osoby do importu:")
+                        edited_import = st.data_editor(df_to_show, hide_index=True, use_container_width=True)
+                        
+                        if st.button(f"💾 Zapisz zaznaczone"):
+                            to_import = edited_import[edited_import["Dodaj"] == True]
+                            
+                            if to_import.empty:
+                                st.warning("Nikogo nie zaznaczono.")
+                            else:
+                                prog_bar = st.progress(0.0)
+                                added_count = 0
+                                
+                                for idx, row in to_import.iterrows():
+                                    tel_raw = str(row["Telefon"])
+                                    success, _ = db.add_client(
+                                        SALON_ID, 
+                                        str(row["Imię"]), 
+                                        tel_raw, 
+                                        str(row["Zabieg"]), 
+                                        None
+                                    )
+                                    if success: added_count += 1
+                                    prog_bar.progress(min((idx + 1) / len(to_import), 1.0))
+                                
+                                st.success(f"✅ Dodano {added_count} kontaktów!")
+                                time.sleep(1.5)
+                                st.rerun()
+                    else:
+                        st.error("Nie znaleziono kolumn 'Imię' i 'Telefon' w pliku.")
 
     # --- C. TABELA (Przeglądanie i Usuwanie) ---
     st.divider()
@@ -120,35 +172,35 @@ with tabs[0]:
     df = db.get_clients(SALON_ID)
     
     if not df.empty:
-        # Sortowanie kolumn
         cols = ['id', 'imie', 'telefon', 'ostatni_zabieg']
         df = df[[c for c in cols if c in df.columns]]
 
-        # Edytor z możliwością usuwania
-        edited = st.data_editor(
-            df,
-            key="client_table",
-            num_rows="fixed", # Blokujemy dodawanie wierszy w tabeli (robimy to formularzem wyżej)
-            use_container_width=True,
+        st.dataframe(
+            df, 
+            use_container_width=True, 
             hide_index=True,
             column_config={
-                "id": None, # Ukrywamy ID
+                "id": st.column_config.TextColumn("ID", width="small"),
                 "imie": "Imię i Nazwisko",
                 "telefon": "Telefon",
                 "ostatni_zabieg": "Ostatni Zabieg"
             }
         )
         
-        # Wykrywanie usunięcia wierszy (jeśli ktoś użył klawisza Delete na klawiaturze w tabeli)
-        # Streamlit data_editor jest tu specyficzny, dla MVP polecam przycisk usuwania:
-        
-        col_del, _ = st.columns([1, 3])
-        with col_del:
-            id_to_del = st.text_input("Podaj ID do usunięcia (opcja awaryjna):")
-            if st.button("Usuń po ID") and id_to_del:
-                # To jest prowizorka, w data_editor num_rows="dynamic" jest lepsze do usuwania,
-                # ale pisałeś, że wolisz prościej.
-                pass 
+        # Proste usuwanie po ID
+        with st.expander("🗑️ Usuwanie"):
+            col_del1, col_del2 = st.columns([3, 1])
+            id_to_del = col_del1.text_input("Wpisz ID osoby do usunięcia:")
+            if col_del2.button("Usuń"):
+                if id_to_del:
+                    # Sprawdzamy czy to ID istnieje w danych (bezpieczeństwo)
+                    if str(id_to_del) in df['id'].astype(str).values:
+                        db.delete_clients_by_ids([int(id_to_del)], SALON_ID)
+                        st.success("Usunięto!")
+                        time.sleep(0.5)
+                        st.rerun()
+                    else:
+                        st.error("Brak takiego ID na liście.")
     else:
         st.info("Baza jest pusta. Dodaj kogoś powyżej.")
 
@@ -158,7 +210,6 @@ with tabs[0]:
 with tabs[1]:
     st.header("Wysyłka Kampanii")
 
-    # Pobieramy bazę
     df_sms = db.get_clients(SALON_ID)
 
     if df_sms.empty:
@@ -173,7 +224,6 @@ with tabs[1]:
             st.session_state['sms_table_key'] += 1
             st.rerun()
             
-        # Przygotowanie danych do tabeli
         df_sms.insert(0, "Wybierz", st.session_state['sms_select_all'])
         
         edited_sms = st.data_editor(
@@ -188,7 +238,6 @@ with tabs[1]:
             }
         )
         
-        # Filtrujemy zaznaczonych
         targets = edited_sms[edited_sms["Wybierz"] == True]
         count = len(targets)
         
@@ -199,7 +248,6 @@ with tabs[1]:
             st.divider()
             st.subheader("Krok 2: Treść Wiadomości")
             
-            # Szybkie cele
             grid = st.columns(3)
             if grid[0].button("📅 Wolne Terminy"): st.session_state['campaign_goal'] = "Mamy wolne terminy jutro -20%."
             if grid[1].button("⏰ Przypomnienie"): st.session_state['campaign_goal'] = "Przypominamy, że dawno Cię nie było."
@@ -208,75 +256,28 @@ with tabs[1]:
             goal = st.text_area("Cel wiadomości (lub wpisz własny):", value=st.session_state['campaign_goal'])
             st.session_state['campaign_goal'] = goal
             
-            # PRZYCISK GENEROWANIA
             if st.button("✨ GENERUJ TREŚĆ (AI)", type="primary"):
                 if goal:
-                    # Wywołanie Twojej funkcji z services.py
                     content = srv.generate_sms_content(
                         st.session_state['salon_name'], 
-                        {}, # puste dane, bo robimy szablon
+                        {}, 
                         goal,
-                        generate_template=True # <--- Ważne!
+                        generate_template=True
                     )
                     st.session_state['sms_preview'] = content
                 else:
                     st.warning("Wpisz cel kampanii.")
 
-            # 3. PODGLĄD I WYSYŁKA (To co zniknęło wcześniej)
+            # 3. PODGLĄD I WYSYŁKA
             if st.session_state['sms_preview']:
                 st.divider()
                 st.subheader("Krok 3: Weryfikacja i Wysyłka")
                 
-                # Pole do edycji wygenerowanej treści
                 final_content = st.text_area(
                     "Oto treść SMS (możesz ją poprawić):", 
                     value=st.session_state['sms_preview'],
                     height=100
                 )
-                st.session_state['sms_preview'] = final_content # Zapisujemy ręczne poprawki
+                st.session_state['sms_preview'] = final_content
                 
-                st.caption("ℹ️ Znacznik `{imie}` zostanie zamieniony na imię klientki.")
-
-                # DWA OSOBNE PRZYCISKI (Test vs Real)
-                col_test, col_real = st.columns(2)
-                
-                # PRZYCISK TEST
-                with col_test:
-                    if st.button("🧪 Wyślij TEST (Symulacja)", use_container_width=True):
-                        # Przygotowanie danych (klejenie numeru)
-                        sending_df = targets.copy()
-                        if 'kierunkowy' not in sending_df.columns: sending_df['kierunkowy'] = '48'
-                        sending_df['full_phone'] = sending_df['kierunkowy'] + sending_df['telefon']
-                        
-                        # Logika Testowa
-                        report = srv.send_campaign_logic(
-                            sending_df,
-                            final_content,
-                            is_test=True, # <--- TRUE
-                            progress_bar=st.progress(0.0),
-                            salon_name=st.session_state['salon_name']
-                        )
-                        st.dataframe(report)
-
-                # PRZYCISK REAL
-                with col_real:
-                    if st.button("🚀 Wyślij WSZYSTKIM (Płatne)", type="primary", use_container_width=True):
-                        # Potwierdzenie (Safety check)
-                        with st.status("Wysyłanie..."):
-                            sending_df = targets.copy()
-                            if 'kierunkowy' not in sending_df.columns: sending_df['kierunkowy'] = '48'
-                            sending_df['full_phone'] = sending_df['kierunkowy'] + sending_df['telefon']
-                            
-                            # Logika Produkcyjna
-                            report = srv.send_campaign_logic(
-                                sending_df,
-                                final_content,
-                                is_test=False, # <--- FALSE
-                                progress_bar=st.progress(0.0),
-                                salon_name=st.session_state['salon_name']
-                            )
-                        st.success("Wysłano!")
-                        st.dataframe(report)
-
-        else:
-            st.info("Zaznacz przynajmniej jedną osobę w tabeli powyżej.")
+                st.caption("ℹ️ Znacznik `{imie}
