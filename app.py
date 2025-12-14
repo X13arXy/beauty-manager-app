@@ -435,15 +435,32 @@ elif page == "🤖 Automat SMS":
             
             if col_btn.button("🚀 WYŚLIJ KAMPANIĘ", type="primary"):
                 progress_bar = st.progress(0.0)
+                
+                # --- TUTAJ SKLEJAMY NUMER DLA LOGIKI WYSYŁKI ---
+                # Tworzymy kopię, żeby nie psuć wyświetlania
+                sending_df = target_df.copy()
+                
+                # Jeśli kolumna kierunkowy nie istnieje, zakładamy 48
+                if 'kierunkowy' not in sending_df.columns:
+                     sending_df['kierunkowy'] = '48'
+                
+                # Nadpisujemy kolumnę 'telefon' pełnym numerem (kierunkowy + telefon)
+                # Dzięki temu SMSAPI dostanie np. "48123456789"
+                sending_df['telefon'] = sending_df.apply(
+                    lambda x: str(x['kierunkowy']).strip() + str(x['telefon']).strip(), 
+                    axis=1
+                )
+                # -----------------------------------------------
+
                 raport_df = srv.send_campaign_logic(
-                    target_df, 
+                    sending_df,  # Przekazujemy tabelę ze sklejonymi numerami
                     st.session_state['campaign_goal'],
                     st.session_state['sms_preview'],
                     is_test, 
                     progress_bar, 
                     st.session_state['preview_client'],
                     st.session_state['salon_name']
-                ) 
+                )
                 st.balloons()
                 st.success("Proces zakończony!")
                 st.divider()
@@ -457,6 +474,7 @@ elif page == "🤖 Automat SMS":
                     mime='text/csv',
                 )
                 st.session_state['sms_preview'] = None
+
 
 
 
