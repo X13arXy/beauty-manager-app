@@ -24,37 +24,67 @@ def login_user(email, password):
         return None
 
 def register_user(email, password, salon_name):
-    """Rejestruje użytkownika i od razu tworzy profil z nazwą salonu"""
+    """
+    Rejestruje użytkownika i przekazuje nazwę salonu w metadanych.
+    Resztę (tworzenie wpisu w tabeli profiles) załatwia Trigger SQL.
+    """
     try:
-        # 1. Tworzymy użytkownika w Auth
-        response = supabase.auth.sign_up({"email": email, "password": password})
-        user = response.user
-        
-        if user:
-            # 2. Od razu tworzymy wpis w tabeli profiles
-            # Dzięki temu nazwa salonu jest zapisana od startu
-            data = {
-                "id": user.id,
-                "nazwa_salonu": salon_name
+        # Przekazujemy nazwę salonu w 'data', żeby SQL mógł ją przechwycić
+        response = supabase.auth.sign_up({
+            "email": email, 
+            "password": password,
+            "options": {
+                "data": { "full_name": salon_name, "nazwa_salonu": salon_name }
             }
-            supabase.table("profiles").insert(data).execute()
-            return user
-        return None
+        })
+        return response.user
     except Exception as e:
         st.error(f"Błąd rejestracji: {e}")
         return None
+
 def logout_user():
     supabase.auth.sign_out()
 
-# --- OPERACJE NA DANYCH (CRUD) ---
+def reset_password_email(email):
+    try:
+        # Pamiętaj, żeby w panelu Supabase -> Authentication -> URL Configuration
+        # ustawić Site URL na swój adres (np. http://localhost:8501 lub adres chmury)
+        supabase.auth.reset_password_for_email(email, {
+            "redirect_to": "http://localhost:8501" 
+        })
+        return True, "Link wysłany! Sprawdź email."
+    except Exception as e:
+        return False, str(e)
 
-# To jest ta poprawiona funkcja, o którą prosiłeś:
+# --- ZARZĄDZANIE PROFILEM ---
+
+def get_salon_name(user_id):
+    """Pobiera nazwę salonu dla zalogowanego użytkownika"""
+    try:
+        res = supabase.table("profiles").select("nazwa_salonu").eq("id", user_id).execute()
+        if res.data and len(res.data) > 0:
+            return res.data[0].get("nazwa_salonu", "")
+        return ""
+    except Exception:
+        return ""
+
+def update_salon_name(user_id, new_name):
+    try:
+        data = {"id": user_id, "nazwa_salonu": new_name}
+        supabase.table("profiles").upsert(data).execute()
+        return True
+    except Exception as e:
+        st.error(f"Błąd zapisu profilu: {e}")
+        return False
+
+# --- KLIENCI (CRUD) ---
+
 def add_client(salon_id, imie, telefon, zabieg, data, kierunkowy="48"):
-    # Czyścimy numer telefonu z myślników i spacji
+    # Czyścimy dane przed wysłaniem
     clean_tel = ''.join(filter(str.isdigit, str(telefon)))
     clean_kier = ''.join(filter(str.isdigit, str(kierunkowy)))
     
-    # Fix na daty
+    # Fix na daty (puste stringi na None)
     data_val = str(data) if data and str(data).strip() != "" else None
     
     try:
@@ -62,7 +92,7 @@ def add_client(salon_id, imie, telefon, zabieg, data, kierunkowy="48"):
             "salon_id": salon_id, 
             "imie": str(imie), 
             "telefon": clean_tel,
-            "kierunkowy": clean_kier,  # <--- NOWE POLE
+            "kierunkowy": clean_kier, 
             "ostatni_zabieg": str(zabieg), 
             "data_wizyty": data_val
         }).execute()
@@ -72,78 +102,26 @@ def add_client(salon_id, imie, telefon, zabieg, data, kierunkowy="48"):
 
 def get_clients(salon_id):
     try:
+        # Mimo włączonego RLS w bazie, filtrujemy też tutaj dla porządku
         res = supabase.table("klientki").select("*").eq("salon_id", salon_id).execute()
         return pd.DataFrame(res.data)
     except:
         return pd.DataFrame()
 
-def delete_client(client_id, salon_id):
-    try:
-        supabase.table("klientki").delete().eq("id", client_id).eq("salon_id", salon_id).execute()
-        return True
-    except:
-        return False
-def reset_password_email(email):
-    try:
-        # To wyśle maila z linkiem do zmiany hasła (obsługiwane przez Supabase)
-        supabase.auth.reset_password_for_email(email, {
-            "redirect_to": "http://localhost:8501" # Tutaj w przyszłości dasz adres swojej apki w chmurze
-        })
-        return True, "Link wysłany! Sprawdź email."
-    except Exception as e:
-        return False, str(e)
-# --- ZARZĄDZANIE PROFILEM ---
-
-def get_salon_name(user_id):
-    """Pobiera nazwę salonu dla zalogowanego użytkownika"""
-    try:
-        # Pobieramy wiersz z tabeli profiles gdzie id = user_id
-        res = supabase.table("profiles").select("nazwa_salonu").eq("id", user_id).execute()
-        
-        # Jeśli coś znalazło, zwracamy nazwę
-        if res.data and len(res.data) > 0:
-            return res.data[0].get("nazwa_salonu", "")
-        else:
-            return ""
-    except Exception as e:
-        return ""
-
-def update_salon_name(user_id, new_name):
-    """Aktualizuje lub tworzy wpis z nazwą salonu"""
-    try:
-        # Używamy 'upsert' (update lub insert)
-        data = {
-            "id": user_id,
-            "nazwa_salonu": new_name
-        }
-        supabase.table("profiles").upsert(data).execute()
-        return True
-    except Exception as e:
-        st.error(f"Błąd zapisu profilu: {e}")
-        return False
 def update_clients_bulk(data_list):
-    """
-    Przyjmuje listę słowników (zmienioną tabelę) i aktualizuje Supabase.
-    Wymaga, aby w danych było pole 'id' (klucz główny).
-    """
+    """Masowa aktualizacja lub dodawanie (Upsert)"""
     try:
-        if not data_list:
-            return True, "Brak danych do zapisu."
-            
-        # upsert w Supabase aktualizuje wiersze, jeśli pasuje ID, 
-        # lub dodaje nowe, jeśli ID nie ma (lub jest nowe)
+        if not data_list: return True, "Brak danych."
         supabase.table("klientki").upsert(data_list).execute()
         return True, "Zapisano pomyślnie!"
     except Exception as e:
         return False, str(e)
-# Wklej to na końcu pliku database.py
 
 def delete_clients_by_ids(id_list, salon_id):
-    """Usuwa listę klientek po ich ID"""
+    """Usuwa listę klientek (bezpiecznie sprawdzając salon_id)"""
     try:
-        if not id_list:
-            return True
-        # Usuwamy tylko te ID, które należą do danego salonu (bezpieczeństwo)
+        if not id_list: return True
+        # Usuwamy tylko jeśli ID jest na liście I należy do tego salonu
         supabase.table("klientki").delete().in_("id", id_list).eq("salon_id", salon_id).execute()
         return True
     except Exception as e:
