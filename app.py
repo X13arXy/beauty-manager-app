@@ -153,7 +153,7 @@ with tabs[0]:
                     else:
                         st.error("Nie znaleziono kolumn 'Imię' i 'Telefon' w pliku.")
 
-    # --- C. TABELA (NAPRAWIONE: CHECKBOXY + GUZIK USUŃ) ---
+    # --- C. TABELA (PEŁNA EDYCJA + CHECKBOXY) ---
     st.divider()
     st.subheader("Lista Klientek")
     
@@ -167,7 +167,9 @@ with tabs[0]:
         # Dodajemy kolumnę "Usuń" na początek
         df.insert(0, "Usuń", False)
 
-        # Edytor z Checkboxami
+        st.caption("📝 Kliknij w imię/telefon, żeby edytować. Zaznacz 'Usuń', żeby skasować.")
+        
+        # Edytor - TERAZ MOŻNA EDYTOWAĆ WSZYSTKO (oprócz ID)
         edited_table = st.data_editor(
             df,
             key="main_client_table",
@@ -175,26 +177,61 @@ with tabs[0]:
             use_container_width=True,
             hide_index=True,
             column_config={
-                "Usuń": st.column_config.CheckboxColumn("Zaznacz", default=False, width="small"),
-                "id": None, # Ukrywamy ID, bo użytkownik nie musi go widzieć
-                "imie": "Imię i Nazwisko",
-                "telefon": "Telefon",
+                "Usuń": st.column_config.CheckboxColumn("Usuń", default=False, width="small"),
+                "id": None, 
+                "imie": st.column_config.TextColumn("Imię i Nazwisko", required=True),
+                "telefon": st.column_config.TextColumn("Telefon", required=True),
                 "ostatni_zabieg": "Ostatni Zabieg"
-            },
-            disabled=["imie", "telefon", "ostatni_zabieg"] # Blokujemy edycję tekstu w tabeli (tylko checkboxy)
+            }
+            # USUNĄŁEM BLOKADĘ "disabled" - teraz można pisać!
         )
         
-        # Logika usuwania zaznaczonych
-        rows_to_delete = edited_table[edited_table["Usuń"] == True]
-        
-        if not rows_to_delete.empty:
-            st.warning(f"Zaznaczono {len(rows_to_delete)} osób do usunięcia.")
-            if st.button("🗑️ USUŃ ZAZNACZONE", type="primary"):
-                ids_to_del = rows_to_delete["id"].tolist()
-                db.delete_clients_by_ids(ids_to_del, SALON_ID)
-                st.success("Usunięto pomyślnie!")
-                time.sleep(0.5)
-                st.rerun()
+        # PRZYCISK ZAPISU (OBSŁUGUJE I EDYCJĘ I USUWANIE)
+        if st.button("💾 ZAPISZ WSZYSTKIE ZMIANY", type="primary"):
+            try:
+                # 1. Rozdzielamy kogo usunąć, a kogo zaktualizować
+                to_delete = edited_table[edited_table["Usuń"] == True]
+                to_update = edited_table[edited_table["Usuń"] == False]
+                
+                changes_made = False
+
+                # A. USUWANIE
+                if not to_delete.empty:
+                    ids_to_del = to_delete["id"].tolist()
+                    db.delete_clients_by_ids(ids_to_del, SALON_ID)
+                    st.toast(f"🗑️ Usunięto {len(ids_to_del)} osób.")
+                    changes_made = True
+
+                # B. AKTUALIZACJA (EDYCJA)
+                if not to_update.empty:
+                    # Konwertujemy na listę słowników dla bazy
+                    # Musimy usunąć kolumnę "Usuń", bo nie ma jej w bazie
+                    data_to_upsert = []
+                    
+                    for index, row in to_update.iterrows():
+                        # Porównujemy czy dane się zmieniły (opcjonalne, ale tutaj ślemy wszystko dla pewności)
+                        clean_row = {
+                            "id": row["id"], # Ważne dla aktualizacji!
+                            "salon_id": SALON_ID,
+                            "imie": row["imie"],
+                            "telefon": ''.join(filter(str.isdigit, str(row["telefon"]))), # Czyścimy telefon przy edycji
+                            "ostatni_zabieg": row["ostatni_zabieg"]
+                        }
+                        data_to_upsert.append(clean_row)
+                    
+                    if data_to_upsert:
+                        db.update_clients_bulk(data_to_upsert)
+                        changes_made = True
+
+                if changes_made:
+                    st.success("✅ Baza zaktualizowana!")
+                    time.sleep(1)
+                    st.rerun()
+                else:
+                    st.info("Brak zmian do zapisania.")
+
+            except Exception as e:
+                st.error(f"Błąd zapisu: {e}")
 
     else:
         st.info("Baza jest pusta. Dodaj kogoś powyżej.")
