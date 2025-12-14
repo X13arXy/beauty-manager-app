@@ -108,21 +108,22 @@ def generate_sms_content(salon_name, client_data, campaign_goal, generate_templa
 def send_sms_via_api(phone, message):
     # ZABEZPIECZENIE: Sprawdzamy czy biblioteka istnieje
     if SmsApiPlClient is None:
-        return False, "❌ BŁĄD: Biblioteka 'smsapi-client' nie jest zainstalowana! Wpisz w terminalu: pip install smsapi-client"
+        return False, "❌ BŁĄD: Biblioteka 'smsapi-client' nie jest zainstalowana!"
 
     token = st.secrets.get("SMSAPI_TOKEN", "")
     if not token: return False, "Brak Tokenu w secrets.toml"
     
     try:
         client = SmsApiPlClient(access_token=token)
-        # --- POPRAWKA TUTAJ ---
-        # Ustawiamy from_="Eco" na sztywno. To naprawia błąd 110.
-        # Nawet jeśli masz PRO, "Eco" zawsze przejdzie (jako losowy numer/Info).
-        client.sms.send(to=str(phone), message=message, from_="Eco") 
+        
+        # --- ZMIANA TUTAJ ---
+        # Usunąłem parametr 'from_=' całkowicie.
+        # Teraz system wyśle SMS "domyślnym" kanałem bez wymuszania nazwy.
+        client.sms.send(to=str(phone), message=message) 
+        
         return True, "OK"
     except Exception as e:
         return False, str(e)
-
 def send_campaign_logic(target_df, template_content, campaign_goal, is_test, progress_bar, salon_name, unique_mode=False):
     total = len(target_df)
     status_box = st.empty()
