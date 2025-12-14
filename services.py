@@ -3,12 +3,13 @@ import google.generativeai as genai
 import pandas as pd
 import time
 
-# Próba importu biblioteki SMS
+# --- IMPORT BIBLIOTEKI SMS (POPRAWIONY) ---
 try:
     from smsapi.client import SmsApiPlClient
 except ImportError:
-    pass
+    SmsApiPlClient = None  # Ustawiamy na None, żeby program się nie wywalił od razu
 
+# --- KONFIGURACJA AI ---
 def init_ai():
     try:
         if "GOOGLE_API_KEY" in st.secrets:
@@ -22,6 +23,7 @@ def init_ai():
 
 model = init_ai()
 
+# --- FUNKCJE POMOCNICZE ---
 def usun_ogonki(tekst):
     """Usuwa polskie znaki."""
     if not isinstance(tekst, str): return ""
@@ -80,7 +82,6 @@ def generate_sms_content(salon_name, client_data, campaign_goal, generate_templa
     else:
         instr = f"Napisz bezpośrednio do klientki {imie}. {instrukcja_zabieg}"
 
-    # --- TUTAJ DODAŁEM ZAKAZ EMOJI ---
     prompt = f"""
     Jesteś recepcjonistką w salonie: {salon_name}.
     Napisz SMS. Cel: {campaign_goal}.
@@ -99,17 +100,19 @@ def generate_sms_content(salon_name, client_data, campaign_goal, generate_templa
         text = res.text.strip()
         if generate_template and "{imie}" not in text: text = f"Hej {{imie}}, {text}"
         
-        # DODATKOWE CZYSZCZENIE (dla pewności usuwamy najczęstsze emotki ręcznie, gdyby AI zwariowało)
-        # To prosty filtr, który usuwa znaki spoza standardowego ASCII
         text_clean = text.encode('ascii', 'ignore').decode('ascii')
-        
-        return usun_ogonki(text_clean) # Zwracamy wyczyszczony tekst
+        return usun_ogonki(text_clean)
     except Exception as e:
         return f"BLAD AI: {str(e)}"
 
 def send_sms_via_api(phone, message):
+    # ZABEZPIECZENIE: Sprawdzamy czy biblioteka istnieje
+    if SmsApiPlClient is None:
+        return False, "❌ BŁĄD: Biblioteka 'smsapi-client' nie jest zainstalowana! Wpisz w terminalu: pip install smsapi-client"
+
     token = st.secrets.get("SMSAPI_TOKEN", "")
-    if not token: return False, "Brak Tokenu"
+    if not token: return False, "Brak Tokenu w secrets.toml"
+    
     try:
         client = SmsApiPlClient(access_token=token)
         client.sms.send(to=str(phone), message=message, from_="Eco") 
