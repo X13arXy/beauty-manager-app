@@ -67,44 +67,45 @@ def parse_vcf(file_content):
 
 # --- LOGIKA GENEROWANIA I WYSYŁKI ---
 
-def generate_sms_content(salon_name, client_data, campaign_goal):
+# Wklej to do services.py, zastępując starą funkcję generate_sms_content
+
+def generate_sms_content(salon_name, client_data, campaign_goal, generate_template=False):
     """
     Generuje treść SMS. 
-    Obsługuje zarówno 'row' (wiersz z DataFrame) jak i 'string' (samo imię dla podglądu).
+    Jeśli generate_template=True -> Tworzy ogólny wzór z {imie}.
     """
     
-    # 1. Rozpoznaj, czy client_data to wiersz czy imię
-    if isinstance(client_data, str):
-        imie = client_data
-        ostatni_zabieg = "nieznany"
-    else:
-        # Obsługa różnych wielkości liter w kluczach
-        imie = client_data.get('imie', client_data.get('Imię', 'Klientko'))
-        ostatni_zabieg = client_data.get('ostatni_zabieg', client_data.get('Ostatni Zabieg', 'nieznany'))
+    # Dane do promptu (dla szablonu używamy generycznych)
+    imie = "{imie}" if generate_template else client_data.get('imie', 'Klientko')
+    
+    # Zabezpieczenie przed brakiem klucza 'ostatni_zabieg'
+    ostatni_zabieg = "Poprzedni Zabieg" if generate_template else client_data.get('ostatni_zabieg', 'nieznany')
 
     if not model: 
         return usun_ogonki(f"Hej {imie}, zapraszamy do {salon_name}!")
     
     prompt = f"""
     Jesteś recepcjonistką w salonie: {salon_name}.
-    Napisz SMS do klientki: {imie}.
-    Ostatni zabieg: {ostatni_zabieg}.
-    Cel: {campaign_goal}.
-    WYTYCZNE:
-    1. Krótko, miło, styl relacyjny.
-    2. Bez polskich znaków (usuń ogonki).
-    3. Podpisz się: {salon_name}.
-    4. Max 150 znaków.
-    5. Bez emoji. 
+    Napisz SMS o celu: {campaign_goal}.
+    
+    WAŻNE:
+    1. W treści użyj znacznika {imie} (dokładnie tak), abym mógł potem podstawić imię klientki.
+    2. Styl: krótki, miły, bez spamu.
+    3. Bez polskich znaków (usuń ogonki).
+    4. Podpisz się: {salon_name}.
+    5. Max 140 znaków.
     """
     
     try:
         res = model.generate_content(prompt)
         text = res.text.strip()
+        # Bezpiecznik: jeśli AI zapomniało o {imie}, wstawiamy je na siłę na początku
+        if "{imie}" not in text and generate_template:
+            text = f"Hej {{imie}}, {text}"
+            
         return usun_ogonki(text)
     except Exception as e:
         return f"BLAD AI: {str(e)}"
-
 def send_sms_via_api(phone, message):
     """Wysyła SMS przez bramkę SMSAPI"""
     token = st.secrets.get("SMSAPI_TOKEN", "")
