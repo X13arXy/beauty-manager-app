@@ -237,23 +237,47 @@ if page == "📂 Baza Klientek":
     col_save, col_info = st.columns([1, 4])
     
     with col_save:
-        if st.button("💾 Zapisz zmiany w tabeli", type="primary"):
+       if st.button("💾 Zapisz zmiany w tabeli", type="primary"):
             try:
-                if edited_database.empty:
-                    st.warning("Tabela jest pusta.")
-                else:
-                    cleaned_data = []
-                    raw_data = edited_database.to_dict(orient='records')
+                # 1. Przygotowanie danych do zapisu (tak jak było wcześniej)
+                cleaned_data = []
+                # Pobieramy dane z edytora
+                raw_data = edited_database.to_dict(orient='records')
+                
+                # Zbieramy ID, które zostały w tabeli (żeby wiedzieć, kogo NIE usuwać)
+                current_ids = []
+
+                for row in raw_data:
+                    row['salon_id'] = SALON_ID
                     
-                    for row in raw_data:
-                        row['salon_id'] = SALON_ID
-                        # Czyścimy ID (dla nowych wierszy)
-                        id_val = row.get('id')
-                        if not id_val or pd.isna(id_val):
-                            if 'id' in row: del row['id']
-                        cleaned_data.append(row)
+                    # Logika czyszczenia ID
+                    id_val = row.get('id')
+                    if not id_val or pd.isna(id_val):
+                        # To jest nowy wiersz, usuwamy puste ID, żeby baza nadała nowe
+                        if 'id' in row: del row['id']
+                    else:
+                        # To jest stary wiersz, zapisujemy jego ID
+                        current_ids.append(id_val)
                     
-                    # Logika zapisu z RLS
+                    cleaned_data.append(row)
+                
+                # 2. LOGIKA USUWANIA (NOWOŚĆ)
+                # Sprawdzamy, jakie ID były w bazie oryginalnie (przed edycją)
+                if not df.empty and "id" in df.columns:
+                    original_ids = df["id"].tolist()
+                    # Znajdujemy ID, które są w bazie, ale nie ma ich już w tabeli na ekranie
+                    ids_to_delete = [oid for oid in original_ids if oid not in current_ids]
+                    
+                    if ids_to_delete:
+                        db.delete_clients_by_ids(ids_to_delete, SALON_ID)
+
+                # 3. Zapis (Upsert) reszty danych
+                if not cleaned_data and ids_to_delete:
+                     # Jeśli usunęliśmy wszystkich i nikogo nie dodajemy
+                     st.success("✅ Wyczyszczono tabelę!")
+                     time.sleep(1)
+                     st.rerun()
+                elif cleaned_data:
                     success, msg = db.update_clients_bulk(cleaned_data)
                     
                     if success:
@@ -262,6 +286,8 @@ if page == "📂 Baza Klientek":
                         st.rerun()
                     else:
                         st.error(f"❌ Błąd zapisu: {msg}")
+                else:
+                    st.warning("Tabela jest pusta, brak zmian do zapisu.")
                         
             except Exception as e:
                 st.error(f"Wystąpił błąd w aplikacji: {e}")
@@ -384,3 +410,4 @@ elif page == "🤖 Automat SMS":
                     mime='text/csv',
                 )
                 st.session_state['sms_preview'] = None
+
