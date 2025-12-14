@@ -160,16 +160,12 @@ with tabs[0]:
     df = db.get_clients(SALON_ID)
     
     if not df.empty:
-        # Sortowanie kolumn
         cols = ['id', 'imie', 'telefon', 'ostatni_zabieg']
         df = df[[c for c in cols if c in df.columns]]
-        
-        # Dodajemy kolumnę "Usuń" na początek
         df.insert(0, "Usuń", False)
 
         st.caption("📝 Kliknij w imię/telefon, żeby edytować. Zaznacz 'Usuń', żeby skasować.")
         
-        # Edytor - EDYCJA I CHECKBOXY
         edited_table = st.data_editor(
             df,
             key="main_client_table",
@@ -185,26 +181,20 @@ with tabs[0]:
             }
         )
         
-        # PRZYCISK ZAPISU (OBSŁUGUJE I EDYCJĘ I USUWANIE)
         if st.button("💾 ZAPISZ WSZYSTKIE ZMIANY", type="primary"):
             try:
-                # 1. Rozdzielamy kogo usunąć, a kogo zaktualizować
                 to_delete = edited_table[edited_table["Usuń"] == True]
                 to_update = edited_table[edited_table["Usuń"] == False]
-                
                 changes_made = False
 
-                # A. USUWANIE
                 if not to_delete.empty:
                     ids_to_del = to_delete["id"].tolist()
                     db.delete_clients_by_ids(ids_to_del, SALON_ID)
                     st.toast(f"🗑️ Usunięto {len(ids_to_del)} osób.")
                     changes_made = True
 
-                # B. AKTUALIZACJA (EDYCJA)
                 if not to_update.empty:
                     data_to_upsert = []
-                    
                     for index, row in to_update.iterrows():
                         clean_row = {
                             "id": row["id"], 
@@ -228,7 +218,6 @@ with tabs[0]:
 
             except Exception as e:
                 st.error(f"Błąd zapisu: {e}")
-
     else:
         st.info("Baza jest pusta. Dodaj kogoś powyżej.")
 
@@ -243,18 +232,15 @@ with tabs[1]:
     if df_sms.empty:
         st.warning("Najpierw dodaj klientki w zakładce Baza!")
     else:
-        # 1. WYBÓR ODBIORCÓW (POPRAWIONE PRZYCISKI)
+        # 1. WYBÓR ODBIORCÓW
         st.subheader("Krok 1: Wybierz Odbiorców")
         
         col_all, col_none, col_space = st.columns([1, 1, 3])
-        
-        # Przycisk ZAZNACZ
         if col_all.button("✅ Zaznacz wszystkich"):
             st.session_state['sms_select_all'] = True
             st.session_state['sms_table_key'] += 1
             st.rerun()
 
-        # Przycisk ODZNACZ (TEGO BRAKOWAŁO)
         if col_none.button("❌ Odznacz wszystkich"):
             st.session_state['sms_select_all'] = False
             st.session_state['sms_table_key'] += 1
@@ -282,23 +268,31 @@ with tabs[1]:
             
             # 2. TREŚĆ I AI
             st.divider()
-            st.subheader("Krok 2: Treść Wiadomości")
+            st.subheader("Krok 2: Treść i Strategia")
             
             grid = st.columns(3)
             if grid[0].button("📅 Wolne Terminy"): st.session_state['campaign_goal'] = "Mamy wolne terminy jutro -20%."
             if grid[1].button("⏰ Przypomnienie"): st.session_state['campaign_goal'] = "Przypominamy, że dawno Cię nie było."
             if grid[2].button("🎁 Promocja"): st.session_state['campaign_goal'] = "Tylko dziś promocja na hybrydę."
 
-            goal = st.text_area("Cel wiadomości (lub wpisz własny):", value=st.session_state['campaign_goal'])
+            goal = st.text_area("Cel wiadomości:", value=st.session_state['campaign_goal'])
             st.session_state['campaign_goal'] = goal
+
+            # --- NOWOŚĆ: WYBÓR TRYBU ---
+            mode_type = st.radio(
+                "Wybierz styl wysyłki:", 
+                ["📝 Jeden Szablon (Szybko i bezpiecznie)", "✨ Unikalne wiadomości (AI pisze dla każdej osoby osobno)"]
+            )
+            use_unique_mode = "Unikalne" in mode_type
             
-            if st.button("✨ GENERUJ TREŚĆ (AI)", type="primary"):
+            if st.button("✨ GENERUJ PODGLĄD", type="primary"):
                 if goal:
+                    # Generujemy podgląd. Jeśli tryb unikalny, generujemy tylko przykład.
                     content = srv.generate_sms_content(
                         st.session_state['salon_name'], 
                         {}, 
                         goal,
-                        generate_template=True
+                        generate_template=not use_unique_mode # Jeśli unikalne, to NIE szablon
                     )
                     st.session_state['sms_preview'] = content
                 else:
@@ -309,14 +303,15 @@ with tabs[1]:
                 st.divider()
                 st.subheader("Krok 3: Weryfikacja i Wysyłka")
                 
+                if use_unique_mode:
+                    st.info("💡 W trybie UNIKALNYM AI wygeneruje inną treść dla każdej osoby podczas wysyłki. Poniżej tylko przykład stylu.")
+                
                 final_content = st.text_area(
-                    "Oto treść SMS (możesz ją poprawić):", 
+                    "Podgląd / Treść:", 
                     value=st.session_state['sms_preview'],
                     height=100
                 )
                 st.session_state['sms_preview'] = final_content
-                
-                st.caption("ℹ️ Znacznik {imie} zostanie zamieniony na imię klientki.")
 
                 col_test, col_real = st.columns(2)
                 
@@ -328,10 +323,12 @@ with tabs[1]:
                         
                         report = srv.send_campaign_logic(
                             sending_df,
-                            final_content,
+                            final_content, 
+                            st.session_state['campaign_goal'], # Przekazujemy cel dla trybu unikalnego
                             is_test=True,
                             progress_bar=st.progress(0.0),
-                            salon_name=st.session_state['salon_name']
+                            salon_name=st.session_state['salon_name'],
+                            unique_mode=use_unique_mode # Przekazujemy tryb
                         )
                         st.dataframe(report)
 
@@ -345,12 +342,13 @@ with tabs[1]:
                             report = srv.send_campaign_logic(
                                 sending_df,
                                 final_content,
+                                st.session_state['campaign_goal'],
                                 is_test=False,
                                 progress_bar=st.progress(0.0),
-                                salon_name=st.session_state['salon_name']
+                                salon_name=st.session_state['salon_name'],
+                                unique_mode=use_unique_mode
                             )
                         st.success("Wysłano!")
                         st.dataframe(report)
-
         else:
             st.info("Zaznacz przynajmniej jedną osobę w tabeli powyżej.")
