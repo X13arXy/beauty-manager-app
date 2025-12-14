@@ -244,6 +244,17 @@ if page == "📂 Baza Klientek":
     if df.empty:
         df = pd.DataFrame(columns=["id", "salon_id", "imie", "telefon", "ostatni_zabieg", "data_wizyty"])
 
+    # ... (wcześniejszy kod z pobieraniem df i fixem wizualnym clean_brackets) ...
+
+    # Upewnij się, że kolumna 'kierunkowy' istnieje w DataFrame
+    if 'kierunkowy' not in df.columns:
+        df['kierunkowy'] = '48'
+
+    # Przesuńmy kolumnę 'kierunkowy' przed 'telefon' dla wygody
+    cols = ['id', 'salon_id', 'imie', 'kierunkowy', 'telefon', 'ostatni_zabieg', 'data_wizyty']
+    # Wybieramy tylko te kolumny, które istnieją w df (bezpiecznik)
+    df = df[[c for c in cols if c in df.columns]]
+
     edited_database = st.data_editor(
         df,
         key="main_db_editor",
@@ -255,7 +266,16 @@ if page == "📂 Baza Klientek":
             "user_id": None,
             "created_at": None,
             "imie": st.column_config.TextColumn("Imię i Nazwisko", required=True, default="Nowa Klientka"),
-            "telefon": st.column_config.TextColumn("Telefon", required=True, default="48"),
+            # --- NOWA KOLUMNA KIERUNKOWY ---
+            "kierunkowy": st.column_config.TextColumn(
+                "Kier.", 
+                default="48", 
+                width="small", 
+                max_chars=4,
+                help="Np. 48"
+            ),
+            # -------------------------------
+            "telefon": st.column_config.TextColumn("Telefon", required=True, default=""),
             "ostatni_zabieg": st.column_config.TextColumn("Ostatni Zabieg", default="Manicure"),
             "data_wizyty": st.column_config.DateColumn("Data wizyty")
         }
@@ -437,5 +457,6 @@ elif page == "🤖 Automat SMS":
                     mime='text/csv',
                 )
                 st.session_state['sms_preview'] = None
+
 
 
