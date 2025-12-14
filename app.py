@@ -164,11 +164,12 @@ if page == "📂 Baza Klientek":
                         if to_import.empty:
                             st.warning("Nie zaznaczono nikogo do importu.")
                         else:
-                            prog_bar = st.progress(0)
+                            prog_bar = st.progress(0.0)
                             count = len(to_import)
                             added = 0
                             errors = []
                             
+                            # --- PĘTLA IMPORTU Z POPRAWIONYMI WCIĘCIAMI ---
                             for idx, row in to_import.iterrows():
                                 success, msg = db.add_client(
                                     SALON_ID, 
@@ -183,17 +184,16 @@ if page == "📂 Baza Klientek":
                                 else:
                                     errors.append(f"{row['Imię']}: {msg}")
                                 
-                               # --- POPRAWKA ---
-                            if count > 0:
-                                progress_val = (idx + 1) / count
-                                # Zabezpieczenie: jeśli wynik wyjdzie > 1.0, ustawiamy na 1.0
-                            if progress_val > 1.0:
-                                    progress_val = 1.0
-                                prog_bar.progress(progress_val)
-                            else:
-                                # Jeśli nie ma elementów do przeliczenia, ustawiamy pasek na 100% od razu
-                                prog_bar.progress(1.0)
+                                # Aktualizacja paska postępu (Wewnątrz pętli)
+                                if count > 0:
+                                    progress_val = (idx + 1) / count
+                                    if progress_val > 1.0:
+                                        progress_val = 1.0
+                                    prog_bar.progress(progress_val)
+                                else:
+                                    prog_bar.progress(1.0)
                             
+                            # --- PO ZAKOŃCZENIU PĘTLI ---
                             if added > 0:
                                 st.success(f"✅ Pomyślnie dodano {added} kontaktów!")
                             
@@ -384,5 +384,3 @@ elif page == "🤖 Automat SMS":
                     mime='text/csv',
                 )
                 st.session_state['sms_preview'] = None
-
-
