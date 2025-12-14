@@ -23,6 +23,7 @@ def init_ai():
 model = init_ai()
 
 def usun_ogonki(tekst):
+    """Usuwa polskie znaki."""
     if not isinstance(tekst, str): return ""
     mapa = {'ą': 'a', 'ć': 'c', 'ę': 'e', 'ł': 'l', 'ń': 'n', 'ó': 'o', 'ś': 's', 'ź': 'z', 'ż': 'z',
             'Ą': 'A', 'Ć': 'C', 'Ę': 'E', 'Ł': 'L', 'Ń': 'N', 'Ó': 'O', 'Ś': 'S', 'Ź': 'Z', 'Ż': 'Z'}
@@ -53,7 +54,6 @@ def parse_vcf(file_content):
                 current_contact["Telefon"] = clean_number
         elif line.startswith("END:VCARD"):
             if "Imię" in current_contact and "Telefon" in current_contact:
-                # Domyślnie wpisujemy "Brak" zamiast "Importowany" przy imporcie VCF
                 current_contact["Ostatni Zabieg"] = "Brak"
                 contacts.append(current_contact)
     return pd.DataFrame(contacts)
@@ -63,10 +63,8 @@ def generate_sms_content(salon_name, client_data, campaign_goal, generate_templa
     
     imie = "{imie}" if generate_template else client_data.get('imie', 'Klientko')
     
-    # --- FILTR ZABIEGÓW (To naprawia problem "Może Importowany?") ---
+    # FILTR ZABIEGÓW
     raw_zabieg = str(client_data.get('ostatni_zabieg', '')).strip()
-    
-    # Lista słów zakazanych, których AI ma nie traktować jako usługi
     zakazane_slowa = ['importowany', 'brak', 'nieznany', 'nan', 'none', '']
     
     if raw_zabieg.lower() in zakazane_slowa:
@@ -77,29 +75,35 @@ def generate_sms_content(salon_name, client_data, campaign_goal, generate_templa
     if not model: 
         return usun_ogonki(f"Hej {imie}, zapraszamy do {salon_name}!")
     
-    # Prompt zależny od trybu
     if generate_template:
         instr = f"Użyj znacznika {{imie}} w treści."
     else:
         instr = f"Napisz bezpośrednio do klientki {imie}. {instrukcja_zabieg}"
 
+    # --- TUTAJ DODAŁEM ZAKAZ EMOJI ---
     prompt = f"""
     Jesteś recepcjonistką w salonie: {salon_name}.
     Napisz SMS. Cel: {campaign_goal}.
     
     WYTYCZNE:
     1. {instr}
-    2. Styl: krótki, miły, naturalny, bez spamu.
-    3. Bez polskich znaków (usuń ogonki).
-    4. Podpisz się: {salon_name}.
-    5. Max 150 znaków.
+    2. Styl: krótki, konkretny, miły.
+    3. BEZWZGLĘDNY ZAKAZ UŻYWANIA EMOJI I IKON (To jest SMS GSM).
+    4. Bez polskich znaków (usuń ogonki).
+    5. Podpisz się: {salon_name}.
+    6. Max 150 znaków.
     """
     
     try:
         res = model.generate_content(prompt)
         text = res.text.strip()
         if generate_template and "{imie}" not in text: text = f"Hej {{imie}}, {text}"
-        return usun_ogonki(text)
+        
+        # DODATKOWE CZYSZCZENIE (dla pewności usuwamy najczęstsze emotki ręcznie, gdyby AI zwariowało)
+        # To prosty filtr, który usuwa znaki spoza standardowego ASCII
+        text_clean = text.encode('ascii', 'ignore').decode('ascii')
+        
+        return usun_ogonki(text_clean) # Zwracamy wyczyszczony tekst
     except Exception as e:
         return f"BLAD AI: {str(e)}"
 
@@ -114,7 +118,6 @@ def send_sms_via_api(phone, message):
         return False, str(e)
 
 def send_campaign_logic(target_df, template_content, campaign_goal, is_test, progress_bar, salon_name, unique_mode=False):
-    """Logika wysyłki obsługująca oba tryby"""
     total = len(target_df)
     status_box = st.empty()
     raport_lista = []
@@ -122,26 +125,21 @@ def send_campaign_logic(target_df, template_content, campaign_goal, is_test, pro
     for i, (index, row) in enumerate(target_df.iterrows()):
         imie_klientki = row.get('imie', 'Klientko')
         
-        # Składanie numeru
         telefon = row.get('full_phone')
         if not telefon:
              kier = row.get('kierunkowy', '48')
              tel_base = row.get('telefon', '')
              telefon = str(kier) + str(tel_base)
         
-        # --- DECYZJA O TREŚCI ---
         if unique_mode:
-            # TRYB UNIKALNY: Generujemy dla każdego osobno
             final_msg = generate_sms_content(salon_name, row, campaign_goal, generate_template=False)
             time.sleep(0.5)
         else:
-            # TRYB SZABLON: Podmieniamy w gotowcu
             try:
                 final_msg = template_content.replace("{imie}", str(imie_klientki))
             except:
                 final_msg = template_content
 
-        # Wysyłka
         if is_test:
             status_text = "🧪 Symulacja"
             status_box.info(f"[{i+1}/{total}] {imie_klientki}: {final_msg}")
