@@ -53,7 +53,8 @@ def parse_vcf(file_content):
                 current_contact["Telefon"] = clean_number
         elif line.startswith("END:VCARD"):
             if "Imię" in current_contact and "Telefon" in current_contact:
-                current_contact["Ostatni Zabieg"] = "Nieznany"
+                # Domyślnie wpisujemy "Brak" zamiast "Importowany" przy imporcie VCF
+                current_contact["Ostatni Zabieg"] = "Brak"
                 contacts.append(current_contact)
     return pd.DataFrame(contacts)
 
@@ -61,7 +62,17 @@ def generate_sms_content(salon_name, client_data, campaign_goal, generate_templa
     """Generuje treść SMS (Unikalną lub Szablon)"""
     
     imie = "{imie}" if generate_template else client_data.get('imie', 'Klientko')
-    zabieg = "Zabieg" if generate_template else client_data.get('ostatni_zabieg', 'brak')
+    
+    # --- FILTR ZABIEGÓW (To naprawia problem "Może Importowany?") ---
+    raw_zabieg = str(client_data.get('ostatni_zabieg', '')).strip()
+    
+    # Lista słów zakazanych, których AI ma nie traktować jako usługi
+    zakazane_slowa = ['importowany', 'brak', 'nieznany', 'nan', 'none', '']
+    
+    if raw_zabieg.lower() in zakazane_slowa:
+        instrukcja_zabieg = "Nie wspominaj o ostatnim zabiegu, bo nie wiemy co to było. Skup się tylko na celu wiadomości."
+    else:
+        instrukcja_zabieg = f"Możesz (ale nie musisz) luźno nawiązać do ostatniego zabiegu: {raw_zabieg}."
 
     if not model: 
         return usun_ogonki(f"Hej {imie}, zapraszamy do {salon_name}!")
@@ -70,7 +81,7 @@ def generate_sms_content(salon_name, client_data, campaign_goal, generate_templa
     if generate_template:
         instr = f"Użyj znacznika {{imie}} w treści."
     else:
-        instr = f"Napisz bezpośrednio do klientki {imie}. Odwołaj się luźno do zabiegu: {zabieg} (jeśli pasuje)."
+        instr = f"Napisz bezpośrednio do klientki {imie}. {instrukcja_zabieg}"
 
     prompt = f"""
     Jesteś recepcjonistką w salonie: {salon_name}.
@@ -122,7 +133,6 @@ def send_campaign_logic(target_df, template_content, campaign_goal, is_test, pro
         if unique_mode:
             # TRYB UNIKALNY: Generujemy dla każdego osobno
             final_msg = generate_sms_content(salon_name, row, campaign_goal, generate_template=False)
-            # Małe opóźnienie żeby nie zbanowali API
             time.sleep(0.5)
         else:
             # TRYB SZABLON: Podmieniamy w gotowcu
